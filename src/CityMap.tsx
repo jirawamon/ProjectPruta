@@ -74,6 +74,9 @@ function CityMap({ devices, loading = false, onAddPosition, addMode = false, sho
   const rangeLayerRef = useRef<L.LayerGroup | null>(null);
 
   const [isTilesLoading, setIsTilesLoading] = useState(true);
+  const [hasInitialTilesLoaded, setHasInitialTilesLoaded] = useState(false);
+  const [showDelayedTilesLoading, setShowDelayedTilesLoading] = useState(false);
+  const tilesLoadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [enabledTypes, setEnabledTypes] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
@@ -144,7 +147,10 @@ function CityMap({ devices, loading = false, onAddPosition, addMode = false, sho
     // Loading indicator for map tiles
     setIsTilesLoading(true);
     tiles.on('loading', () => setIsTilesLoading(true));
-    tiles.on('load', () => setIsTilesLoading(false));
+    tiles.on('load', () => {
+      setHasInitialTilesLoaded(true);
+      setIsTilesLoading(false);
+    });
     tiles.on('tileerror', () => setIsTilesLoading(false));
 
     tiles.addTo(map);
@@ -162,6 +168,35 @@ function CityMap({ devices, loading = false, onAddPosition, addMode = false, sho
       tempMarkerRef.current = null;
     };
   }, []);
+
+  // Show map loading overlay only if initial tiles take longer than 3 seconds
+  useEffect(() => {
+    if (tilesLoadingTimerRef.current) {
+      clearTimeout(tilesLoadingTimerRef.current);
+      tilesLoadingTimerRef.current = null;
+    }
+
+    if (hasInitialTilesLoaded) {
+      setShowDelayedTilesLoading(false);
+      return;
+    }
+
+    if (isTilesLoading) {
+      setShowDelayedTilesLoading(false);
+      tilesLoadingTimerRef.current = setTimeout(() => {
+        setShowDelayedTilesLoading(true);
+      }, 3000);
+    } else {
+      setShowDelayedTilesLoading(false);
+    }
+
+    return () => {
+      if (tilesLoadingTimerRef.current) {
+        clearTimeout(tilesLoadingTimerRef.current);
+        tilesLoadingTimerRef.current = null;
+      }
+    };
+  }, [isTilesLoading, hasInitialTilesLoaded]);
 
   // Update click-to-add handler
   useEffect(() => {
@@ -325,8 +360,8 @@ const addDeviceMarker = (layer: L.LayerGroup, device: CityDevice) => {
     });
 };
 
-  const showLoadingOverlay = loading || isTilesLoading;
-  const loadingMessage = loading ? 'กำลังโหลดข้อมูล...' : 'กำลังโหลดแผนที่...';
+  const showLoadingOverlay = loading || (!hasInitialTilesLoaded && isTilesLoading && showDelayedTilesLoading);
+  const loadingMessage = loading ? 'กำลังโหลดข้อมูล...' : 'กำลังดาวโหลด';
 
   return (
     <div className="city-map-container">
@@ -391,7 +426,7 @@ const addDeviceMarker = (layer: L.LayerGroup, device: CityDevice) => {
 
       <div 
         ref={mapContainerRef} 
-        className="map-container"
+        className={`map-container ${addMode ? 'is-add-mode' : ''}`}
       />
       
       <div className="map-footer">
