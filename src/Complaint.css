@@ -213,3 +213,13 @@ th {
 }
 .btn-icon.save:hover { background-color: #dcfce7; }
 .btn-icon.cancel:hover { background-color: #fee2e2; }
+
+@media screen and (max-width: 768px) {
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-wrapper, .input-with-icon {
+    max-width: 100%;
+  }
+}

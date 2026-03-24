@@ -275,3 +275,27 @@
 .city-map-container .leaflet-bottom.leaflet-left .leaflet-control-layers {
   margin-left: 240px;
 }
+
+/* ===================== โหมดมือถือ (Mobile) ===================== */
+@media screen and (max-width: 768px) {
+  .map-header {
+    min-width: 90%;
+    padding: 0.5rem 1rem;
+    top: 80px; /* หลบปุ่ม Hamburger */
+  }
+
+  .map-legend {
+    bottom: 90px; /* ดันขึ้นเพื่อหลบแผง Overview ด้านล่าง */
+    left: 10px;
+    padding: 1rem;
+  }
+
+  .city-map-container .leaflet-bottom.leaflet-left {
+    margin-left: 10px;
+    margin-bottom: 90px;
+  }
+
+  .city-map-container .leaflet-bottom.leaflet-left .leaflet-control-layers {
+    margin-left: 0; /* รีเซ็ตมาร์จิ้นเดิมของคอม */
+  }
+}

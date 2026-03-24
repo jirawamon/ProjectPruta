@@ -265,3 +265,13 @@
   color: #334155;
   font-size: 0.95rem;
 }
+
+@media screen and (max-width: 768px) {
+  .coordinate-inputs {
+    grid-template-columns: 1fr; /* ให้ช่อง Lat/Lng เรียงลงมาแทนซ้ายขวา */
+  }
+  .modal-content {
+    width: 95%;
+    max-height: 85vh;
+  }
+}

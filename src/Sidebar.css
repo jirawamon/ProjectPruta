@@ -62,3 +62,20 @@
   background-color: #3b82f6;
   color: rgb(255, 255, 255);
 }
+
+/* ===================== โหมดมือถือ (Mobile) ===================== */
+@media screen and (max-width: 768px) {
+  .shared-sidebar {
+    position: fixed;
+    top: 0;
+    left: -280px; /* ซ่อนไว้ทางซ้ายนอกจอ */
+    transition: left 0.3s ease-in-out;
+    z-index: 9999;
+    box-shadow: 4px 0 15px rgba(0,0,0,0.5);
+  }
+
+  /* คลาสนี้จะถูกเรียกใช้เมื่อกดเปิดเมนู */
+  .shared-sidebar.open {
+    left: 0;
+  }
+}

@@ -51,6 +51,15 @@ export interface NewDeviceInput {
   useRadiusPin: boolean;
   useSketchPin: boolean;
   radiusMeters?: number;
+  
+  // --- ฟิลด์ใหม่ที่เพิ่มเข้ามาเพื่อความยืดหยุ่น ---
+  lampType?: string;
+  bulbType?: string;
+  watt?: string;
+  owner?: string;
+  isp?: string;
+  speed?: string;
+  pressure?: string;
 }
 
 export interface ComplaintInput {

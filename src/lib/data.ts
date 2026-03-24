@@ -245,6 +245,32 @@ export async function fetchAllDevices(): Promise<Device[]> {
 
 export async function saveDevicePosition(input: NewDeviceInput): Promise<Device> {
   const deviceCode = `NEW-${Date.now()}`;
+  
+  // --- จัดการแพ็กข้อมูลยืดหยุ่นใส่เข้าไปใน Description ---
+  let finalDescription = input.description || '';
+  const extraDetails: string[] = [];
+
+  if (input.type === 'streetlight') {
+    if (input.owner) extraDetails.push(`เจ้าของ: ${input.owner}`);
+    if (input.watt) extraDetails.push(`กำลังไฟ: ${input.watt}`);
+    if (input.lampType) extraDetails.push(`โคม: ${input.lampType}`);
+    if (input.bulbType) extraDetails.push(`หลอด: ${input.bulbType}`);
+  } else if (input.type === 'wifi') {
+    if (input.isp) extraDetails.push(`ISP: ${input.isp}`);
+    if (input.speed) extraDetails.push(`ความเร็ว: ${input.speed}`);
+  } else if (input.type === 'hydrant') {
+    if (input.pressure) extraDetails.push(`แรงดันน้ำ: ${input.pressure}`);
+  }
+
+  // ถ้ามีการกรอกข้อมูลเพิ่มเติม ให้เอามาต่อท้ายหมายเหตุเดิม
+  if (extraDetails.length > 0) {
+    const detailsString = extraDetails.join(' | ');
+    finalDescription = finalDescription 
+      ? `${finalDescription}\n(รายละเอียด: ${detailsString})` 
+      : `รายละเอียด: ${detailsString}`;
+  }
+
+  // สร้าง Object Device เตรียมคืนค่า
   const device: Device = {
     id: deviceCode,
     name: input.name,
@@ -253,16 +279,19 @@ export async function saveDevicePosition(input: NewDeviceInput): Promise<Device>
     lng: input.lng,
     status: input.status,
     department: DEFAULT_DEPARTMENT,
-    description: input.description,
+    description: finalDescription, // ใช้ description ที่รวมร่างแล้ว
     rangeMeters: input.useRadiusPin ? input.radiusMeters ?? 0 : 0,
     sketchPin: input.useSketchPin,
     source: 'supabase',
+    // แนบค่าจริงไปด้วยเผื่อ Frontend เอาไปใช้ต่อเลย (Cast type เพื่อเลี่ยง TS Error ชั่วคราว)
+    ...(input as any) 
   };
 
   if (!isSupabaseEnabled || !supabase) {
     return device;
   }
 
+  // Insert ลง Supabase ด้วยโครงสร้างเดิม
   const { error } = await supabase.from('devices').insert({
     device_code: deviceCode,
     name: input.name,
@@ -271,7 +300,7 @@ export async function saveDevicePosition(input: NewDeviceInput): Promise<Device>
     lng: input.lng,
     status: input.status,
     department: DEFAULT_DEPARTMENT,
-    description: input.description || null,
+    description: finalDescription || null, // ส่งลง DB
     range_meters: input.useRadiusPin ? input.radiusMeters ?? 0 : 0,
     sketch_pin: input.useSketchPin,
   });
@@ -296,6 +325,43 @@ export async function saveComplaint(input: ComplaintInput): Promise<void> {
     status: input.status,
     description: input.description ?? null,
   });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+// ดึงข้อมูลประวัติการซ่อม/ร้องเรียนของอุปกรณ์นั้นๆ
+export async function fetchDeviceComplaints(deviceId: string) {
+  if (!isSupabaseEnabled || !supabase) return [];
+
+  const { data, error } = await supabase
+    .from('complaints')
+    .select('*')
+    .eq('device_id', deviceId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to fetch complaints:', error.message);
+    return [];
+  }
+
+  return data;
+}
+
+// อัปเดตข้อมูลอุปกรณ์ (เตรียมไว้สำหรับปุ่ม Save)
+export async function updateDeviceData(deviceId: string, updates: Partial<Device>) {
+  if (!isSupabaseEnabled || !supabase) return;
+
+  const { error } = await supabase
+    .from('devices')
+    .update({
+      name: updates.name,
+      status: updates.status,
+      description: updates.description,
+      // แปลงฟิลด์อื่นๆ ตามต้องการ
+    })
+    .eq('device_code', deviceId);
 
   if (error) {
     throw new Error(error.message);

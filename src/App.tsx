@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Home, MapPin, List, ChevronUp, ChevronDown, Plus } from 'lucide-react';
+import { Home, MapPin, List, ChevronUp, ChevronDown, Plus, Menu, X } from 'lucide-react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import './App.css';
 import './durablearticles.css';
 import { getStatusBadgeClass, statusLabels } from './status';
 import CityMap from './CityMap.tsx';
-import AddPositionModal, { type NewPositionData } from './AddPositionModal';
+import AddPositionModal from './AddPositionModal';
 import StreetLight from './StreetLight';
 import WifiSpot from './WifiSpot';
 import FireHydrant from './FireHydrant';
 import { fetchAllDevices, saveComplaint, saveDevicePosition } from './lib/data';
-import type { Device, DeviceType } from './types';
+import type { Device, DeviceType, NewDeviceInput } from './types';
 
 function OverviewPage({
   devices,
@@ -85,6 +85,7 @@ function OverviewPage({
       </div>
 
       <div
+      className="overview-right-panel"
         style={{
           position: 'absolute',
           bottom: 0,
@@ -291,6 +292,7 @@ function App() {
   const [addMode, setAddMode] = useState(false);
   const [tempLat, setTempLat] = useState(0);
   const [tempLng, setTempLng] = useState(0);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -321,8 +323,8 @@ function App() {
     setIsAddModalOpen(true);
   };
 
-  const handleSavePosition = async (data: NewPositionData) => {
-    const newDevice = await saveDevicePosition(data);
+const handleSavePosition = async (data: NewDeviceInput) => {
+      const newDevice = await saveDevicePosition(data);
     setDevices((prev) => [...prev, newDevice]);
     setAddMode(false);
     alert('เพิ่มตำแหน่งใหม่สำเร็จ!');
@@ -363,16 +365,41 @@ function App() {
 
   return (
     <div className="app-container" style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden' }}>
-      <aside className="shared-sidebar" style={{ width: '250px', flexShrink: 0, zIndex: 20 }}>
-        <div className="sidebar-left-header">
-          <div className="logo-icon">
-            <Home size={20} color="white" />
+      
+      {/* 🟢 ส่วนที่เพิ่มใหม่ 1: ปุ่มเปิดเมนูบนมือถือ */}
+      <button className="mobile-menu-btn" onClick={() => setIsMobileMenuOpen(true)}>
+        <Menu size={24} />
+      </button>
+
+      {/* 🟢 ส่วนที่เพิ่มใหม่ 2: พื้นหลังสีดำจางๆ ตอนกดเปิดเมนู */}
+      {isMobileMenuOpen && (
+        <div className="sidebar-overlay" onClick={() => setIsMobileMenuOpen(false)}></div>
+      )}
+
+      {/* 🟡 ส่วนที่แก้ไข 1: แทรกตัวแปร isMobileMenuOpen ใส่ Class และปรับ zIndex เป็น 9999 */}
+      <aside className={`shared-sidebar ${isMobileMenuOpen ? 'open' : ''}`} style={{ width: '250px', flexShrink: 0, zIndex: 9999 }}>
+        
+        {/* 🟡 ส่วนที่แก้ไข 2: ปรับ Layout Header เพื่อให้ใส่ปุ่ม [X] ปิดเมนูได้ */}
+        <div className="sidebar-left-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <div className="logo-icon">
+              <Home size={20} color="white" />
+            </div>
+            <div>
+              <h3>เทศบาลตำบล</h3>
+              <p>พลูตาหลวง</p>
+            </div>
           </div>
-          <div>
-            <h3>เทศบาลตำบล</h3>
-            <p>พลูตาหลวง</p>
-          </div>
+          
+          {/* 🟢 ส่วนที่เพิ่มใหม่ 3: ปุ่ม X สำหรับปิดเมนู (จะโผล่มาเฉพาะมือถือ) */}
+          {isMobileMenuOpen && (
+            <div onClick={() => setIsMobileMenuOpen(false)} style={{ cursor: 'pointer', padding: '5px' }}>
+              <X size={24} color="#94a3b8" />
+            </div>
+          )}
         </div>
+
+        {/* เมนูรายการอุปกรณ์และภาพรวม (โค้ดเดิม ไม่มีการเปลี่ยนแปลง) */}
         <div className="menu-list">
           <NavLink to="/" className={`menu-item ${activeMenu === 'overview' ? 'active' : ''}`}>
             <Home size={18} /> ภาพรวม

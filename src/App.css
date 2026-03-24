@@ -300,3 +300,56 @@
   /* พื้นที่แสดงเนื้อหาอุปกรณ์ */
   min-height: 200px; 
 }
+
+/* ===================== โหมดมือถือ (Mobile) ===================== */
+@media screen and (max-width: 768px) {
+  /* แผงข้อมูล Overview ด้านล่างขวา */
+  .overview-right-panel {
+    width: calc(100% - 20px) !important;
+    right: 10px !important;
+    left: 10px !important;
+  }
+
+  /* หน้าจอ Device */
+  .device-page {
+    padding: 10px;
+  }
+  
+  .device-tabs {
+    flex-wrap: wrap; /* ให้ปุ่ม Tab ตัดบรรทัดได้ถ้าล้น */
+  }
+
+  /* ปุ่ม Hamburger (แสดงเฉพาะมือถือ) */
+  .mobile-menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 1000;
+    background-color: #0f172a;
+    color: white;
+    border: none;
+    padding: 10px 12px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    cursor: pointer;
+  }
+
+  /* ฉากหลังสีดำจางๆ ตอนเปิด Sidebar */
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 9998;
+    backdrop-filter: blur(2px);
+  }
+}
+
+/* ซ่อนปุ่ม Hamburger และ Overlay บนจอคอม */
+@media screen and (min-width: 769px) {
+  .mobile-menu-btn, .sidebar-overlay {
+    display: none !important;
+  }
+}
