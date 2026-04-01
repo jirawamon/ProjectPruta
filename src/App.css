@@ -69,9 +69,7 @@
 .map-container {
   flex: 1;
   position: relative;
-  background-image: url("https://images.pexels.com/photos/213159/pexels-photo-213159.jpeg?auto=compress&cs=tinysrgb&w=1600");
-  background-size: cover;
-  background-position: center;
+  background: linear-gradient(180deg, #e2e8f0 0%, #f8fafc 100%);
   margin-right: 29rem; /* เว้นที่สำหรับ sidebar */
 }
 

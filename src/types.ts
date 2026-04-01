@@ -11,6 +11,7 @@ export interface BaseDevice {
   status: DeviceStatus;
   department: string;
   description?: string;
+  deviceImageUrl?: string;
   rangeMeters?: number;
   sketchPin?: boolean;
   source: 'sheet' | 'supabase';
@@ -69,6 +70,9 @@ export interface ComplaintInput {
   location: string;
   status: string;
   description?: string;
+  imageUrl?: string;
+  attachmentFile?: File;
+  onUploadProgress?: (percent: number) => void;
 }
 
 export interface AppNavigateDetail {

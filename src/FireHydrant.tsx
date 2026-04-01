@@ -9,6 +9,7 @@ interface FireHydrantProps {
   refreshing: boolean;
   onNavigateOverview: () => void;
   onComplaintSubmitted: () => void;
+  onOpenReport: (device: Device) => void;
 }
 
 function FireHydrant(props: FireHydrantProps) {

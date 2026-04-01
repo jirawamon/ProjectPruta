@@ -9,6 +9,7 @@ interface WifiSpotProps {
   refreshing: boolean;
   onNavigateOverview: () => void;
   onComplaintSubmitted: () => void;
+  onOpenReport: (device: Device) => void;
 }
 
 function WifiSpot(props: WifiSpotProps) {

@@ -57,6 +57,7 @@ export interface Database {
           location: string | null;
           status: string;
           description: string | null;
+          image_url: string | null;
           created_at: string | null;
         };
         Insert: {
@@ -67,6 +68,7 @@ export interface Database {
           location?: string | null;
           status: string;
           description?: string | null;
+          image_url?: string | null;
           created_at?: string | null;
         };
         Update: {
@@ -77,6 +79,7 @@ export interface Database {
           location?: string | null;
           status?: string;
           description?: string | null;
+          image_url?: string | null;
           created_at?: string | null;
         };
         Relationships: [];

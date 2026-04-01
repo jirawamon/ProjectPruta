@@ -4,6 +4,23 @@ import 'leaflet/dist/leaflet.css';
 import './CityMap.css';
 import { statusColors, statusLabels as sharedStatusLabels } from './status';
 import type { Device } from './types';
+import { isSupabaseEnabled, supabase } from './lib/supabase';
+
+// Get Esri World Imagery satellite preview (FREE, no API key required, CORS-friendly)
+function getEsriSatelliteUrl(lat: number, lng: number, zoom: number = 18): string {
+  const n = Math.pow(2, zoom);
+  const xtile = Math.floor(((lng + 180) / 360) * n);
+  const latRad = (lat * Math.PI) / 180;
+  const ytile = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n);
+  
+  // Direct tile URL from Esri - no key needed, high quality satellite imagery
+  return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${ytile}/${xtile}`;
+}
+
+// Get Google Street View link (opens in new tab - 360° panorama view)
+function getGoogleStreetViewLink(lat: number, lng: number): string {
+  return `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`;
+}
 
 const iconDefaultPrototype = (
   L.Icon.Default as unknown as {
@@ -75,6 +92,7 @@ function CityMap({
   const rangeLayerRef = useRef<L.LayerGroup | null>(null);
   const connectionLayerRef = useRef<L.LayerGroup | null>(null);
   const hasSetInitialCenterRef = useRef(false);
+  const complaintImageCacheRef = useRef<Map<string, string | null>>(new Map());
 
   const [enabledTypes, setEnabledTypes] = useState<Record<Device['type'], boolean>>({
     streetlight: true,
@@ -92,6 +110,14 @@ function CityMap({
     () => devices.filter((d) => enabledTypes[d.type] !== false),
     [devices, enabledTypes],
   );
+
+  useEffect(() => {
+    console.debug('[CityMap] render cycle:', {
+      totalDevices: devices.length,
+      visibleDevices: visibleDevices.length,
+      enabledTypes,
+    });
+  }, [devices, visibleDevices, enabledTypes]);
 
   const getDeviceRangeMeters = (device: Device): number => {
     if (typeof device.rangeMeters === 'number' && Number.isFinite(device.rangeMeters) && device.rangeMeters >= 0) {
@@ -143,6 +169,7 @@ function CityMap({
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       minZoom: 10,
       maxZoom: 18,
+      crossOrigin: true,
       keepBuffer: 4,
       updateWhenIdle: true,
       updateWhenZooming: false,
@@ -154,6 +181,7 @@ function CityMap({
         attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
         minZoom: 10,
         maxZoom: 18,
+        crossOrigin: true,
         keepBuffer: 4,
         updateWhenIdle: true,
         updateWhenZooming: false,
@@ -175,7 +203,25 @@ function CityMap({
     connectionLayerRef.current = L.layerGroup().addTo(map);
     markerLayerRef.current = L.layerGroup().addTo(map);
 
+    // Ensure tiles are laid out after React/CSS finish sizing the container.
+    const initialInvalidate = window.setTimeout(() => {
+      map.invalidateSize();
+    }, 120);
+
+    const handleResize = () => {
+      map.invalidateSize();
+    };
+    window.addEventListener('resize', handleResize);
+
+    const observer = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    observer.observe(mapContainerRef.current);
+
     return () => {
+      window.clearTimeout(initialInvalidate);
+      window.removeEventListener('resize', handleResize);
+      observer.disconnect();
       map.remove();
       mapRef.current = null;
       markerLayerRef.current = null;
@@ -185,6 +231,14 @@ function CityMap({
       hasSetInitialCenterRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const rafId = window.requestAnimationFrame(() => {
+      mapRef.current?.invalidateSize();
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [loading, visibleDevices.length]);
 
   const haversineMeters = (a: Pick<Device, 'lat' | 'lng'>, b: Pick<Device, 'lat' | 'lng'>): number => {
     const R = 6371000;
@@ -282,10 +336,17 @@ function CityMap({
   const addDeviceMarker = (layer: L.LayerGroup, device: Device) => {
     const deviceInfo = deviceIcons[device.type];
     const markerColor = statusColors[device.status];
+    
+    // Use device image if available, otherwise use Esri satellite preview
+    const mapImageUrl = device.deviceImageUrl?.trim() || getEsriSatelliteUrl(device.lat, device.lng);
+    const streetViewLink = getGoogleStreetViewLink(device.lat, device.lng);
+    const popupSourceLabel = device.deviceImageUrl?.trim() ? 'รูปจริง' : 'รูปแผนที่อัตโนมัติ';
 
+    // Add status-based animation class
+    const statusClass = `marker-status-${device.status}`;
     const markerContainerClass = device.sketchPin
-      ? 'marker-container marker-container--sketch'
-      : 'marker-container';
+      ? `marker-container marker-container--sketch ${statusClass}`
+      : `marker-container ${statusClass}`;
 
     const customIcon = L.divIcon({
       className: 'custom-marker',
@@ -304,7 +365,13 @@ function CityMap({
     const popupContent = `
       <div class="device-popup" style="font-family: 'Prompt', sans-serif;">
         <div class="popup-cover" style="height: 140px; background-color: #f3f4f6; position: relative; display: flex; justify-content: center; align-items: center;">
-          <span style="font-size: 64px; opacity: 0.2;">${deviceInfo.icon}</span>
+          <img class="popup-location-image" src="${mapImageUrl}" alt="รูปสถานที่ ${device.name}" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          
+          <div style="display: none; width: 100%; height: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); justify-content: center; align-items: center; color: white; font-size: 14px; font-weight: bold; text-align: center; padding: 16px;">
+            📍 ไม่สามารถโหลดรูปได้
+          </div>
+
+          <div class="popup-image-source" style="position: absolute; top: 12px; right: 12px; background-color: rgba(15,23,42,0.8); color: white; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600;">${popupSourceLabel}</div>
 
           <div style="position: absolute; top: 12px; left: 12px; background-color: white; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; color: ${statusColors[device.status]}; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 4px;">
             <div style="width: 8px; height: 8px; border-radius: 50%; background-color: ${statusColors[device.status]};"></div>
@@ -335,6 +402,10 @@ function CityMap({
         </div>
 
         <div class="popup-footer" style="padding: 16px;">
+          <a href="${streetViewLink}" target="_blank" rel="noopener noreferrer" class="street-view-btn" style="display: block; width: 100%; padding: 10px; background-color: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-family: inherit; text-align: center; text-decoration: none; transition: 0.2s; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2); margin-bottom: 10px;" onmouseover="this.style.backgroundColor='#059669'" onmouseout="this.style.backgroundColor='#10b981'">
+            🔍 ดูภาพ Street View (360°)
+          </a>
+
           <button class="report-issue-btn" style="width: 100%; padding: 10px; background-color: #ef4444; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-family: inherit; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; box-shadow: 0 2px 4px rgba(239, 68, 68, 0.2);" onmouseover="this.style.backgroundColor='#dc2626'" onmouseout="this.style.backgroundColor='#ef4444'">
             📢 แจ้งซ่อมแซม / ร้องเรียน
           </button>
@@ -354,6 +425,49 @@ function CityMap({
     marker.on('popupopen', (e) => {
       const popupElement = e.popup.getElement();
       if (!popupElement) return;
+
+      const imageElement = popupElement.querySelector<HTMLImageElement>('.popup-location-image');
+      const sourceBadge = popupElement.querySelector<HTMLElement>('.popup-image-source');
+      
+      // When popup opens, check if there's a newer complaint image from Supabase
+      if (!device.deviceImageUrl?.trim() && imageElement && sourceBadge && isSupabaseEnabled && supabase) {
+        const cacheKey = `${device.type}:${device.id}`;
+        const cached = complaintImageCacheRef.current.get(cacheKey);
+
+        if (cached !== undefined) {
+          if (cached) {
+            imageElement.src = cached;
+            sourceBadge.textContent = 'รูปจริง (ร้องเรียนล่าสุด)';
+          }
+          // Otherwise keep the default MapQuest map
+        } else {
+          // Fetch latest complaint image from Supabase
+          void (async () => {
+            const result = await supabase
+              .from('complaints')
+              .select('image_url')
+              .eq('device_id', device.id)
+              .not('image_url', 'is', null)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (result.error) {
+              complaintImageCacheRef.current.set(cacheKey, null);
+              return;
+            }
+
+            const latestImage = result.data?.image_url?.trim() || null;
+            complaintImageCacheRef.current.set(cacheKey, latestImage);
+
+            if (latestImage) {
+              imageElement.src = latestImage;
+              sourceBadge.textContent = 'รูปจริง (ร้องเรียนล่าสุด)';
+            }
+            // Otherwise use MapQuest map (already loaded by default)
+          })();
+        }
+      }
 
       const reportBtn = popupElement.querySelector('.report-issue-btn');
       if (reportBtn) {
@@ -391,6 +505,12 @@ function CityMap({
     markerLayer.clearLayers();
     rangeLayer.clearLayers();
     connectionLayer.clearLayers();
+
+    console.debug('[CityMap] rebuilding layers:', {
+      markerCount: visibleDevices.length,
+      showRanges,
+      showConnections,
+    });
 
     visibleDevices.forEach((device) => {
       if (showRanges) {
@@ -488,7 +608,7 @@ function CityMap({
         </div>
       </div>
 
-      <div ref={mapContainerRef} className={`map-container ${addMode ? 'is-add-mode' : ''}`} />
+      <div ref={mapContainerRef} className={`city-map-leaflet-container ${addMode ? 'is-add-mode' : ''}`} />
 
       <div className="map-footer">
         <p>

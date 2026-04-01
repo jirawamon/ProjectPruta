@@ -6,11 +6,14 @@ import './durablearticles.css';
 import { getStatusBadgeClass, statusLabels } from './status';
 import CityMap from './CityMap.tsx';
 import AddPositionModal from './AddPositionModal';
+import ReportFormModal from './ReportFormModal';
 import StreetLight from './StreetLight';
 import WifiSpot from './WifiSpot';
 import FireHydrant from './FireHydrant';
-import { fetchAllDevices, saveComplaint, saveDevicePosition } from './lib/data';
+import { fetchAllDevices, saveDevicePosition } from './lib/data';
 import type { Device, DeviceType, NewDeviceInput } from './types';
+
+
 
 function OverviewPage({
   devices,
@@ -208,12 +211,14 @@ function DeviceRoutePage({
   refreshing,
   onNavigateOverview,
   onComplaintSubmitted,
+  onOpenReport,
 }: {
   devices: Device[];
   onRefresh: () => void;
   refreshing: boolean;
   onNavigateOverview: () => void;
   onComplaintSubmitted: () => void;
+  onOpenReport: (device: Device) => void;
 }) {
   const params = useParams<{ type: string }>();
   const navigate = useNavigate();
@@ -254,6 +259,7 @@ function DeviceRoutePage({
             refreshing={refreshing}
             onNavigateOverview={onNavigateOverview}
             onComplaintSubmitted={onComplaintSubmitted}
+            onOpenReport={onOpenReport}
           />
         )}
         {type === 'wifi' && (
@@ -265,6 +271,7 @@ function DeviceRoutePage({
             refreshing={refreshing}
             onNavigateOverview={onNavigateOverview}
             onComplaintSubmitted={onComplaintSubmitted}
+            onOpenReport={onOpenReport}
           />
         )}
         {type === 'hydrant' && (
@@ -276,6 +283,7 @@ function DeviceRoutePage({
             refreshing={refreshing}
             onNavigateOverview={onNavigateOverview}
             onComplaintSubmitted={onComplaintSubmitted}
+            onOpenReport={onOpenReport}
           />
         )}
       </div>
@@ -293,6 +301,7 @@ function App() {
   const [tempLat, setTempLat] = useState(0);
   const [tempLng, setTempLng] = useState(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [reportTarget, setReportTarget] = useState<Device | null>(null);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -306,6 +315,14 @@ function App() {
 
     try {
       const data = await fetchAllDevices();
+      console.debug('[App] loadDevices fetched:', {
+        count: data.length,
+        byType: {
+          streetlight: data.filter((d) => d.type === 'streetlight').length,
+          wifi: data.filter((d) => d.type === 'wifi').length,
+          hydrant: data.filter((d) => d.type === 'hydrant').length,
+        },
+      });
       setDevices(data);
     } finally {
       setLoadingSheets(false);
@@ -317,15 +334,30 @@ function App() {
     void loadDevices(false);
   }, []);
 
+  useEffect(() => {
+    console.debug('[App] devices state updated:', {
+      count: devices.length,
+      latest: devices.length > 0 ? devices[devices.length - 1] : null,
+    });
+  }, [devices]);
+
   const handleAddPosition = (lat: number, lng: number) => {
     setTempLat(lat);
     setTempLng(lng);
     setIsAddModalOpen(true);
   };
 
-const handleSavePosition = async (data: NewDeviceInput) => {
-      const newDevice = await saveDevicePosition(data);
-    setDevices((prev) => [...prev, newDevice]);
+  const handleSavePosition = async (data: NewDeviceInput) => {
+    const newDevice = await saveDevicePosition(data);
+    console.debug('[App] saveDevicePosition returned:', newDevice);
+
+    setDevices((prev) => {
+      const exists = prev.some((item) => item.type === newDevice.type && item.id === newDevice.id);
+      if (exists) return prev;
+      return [...prev, newDevice];
+    });
+
+    await loadDevices(true);
     setAddMode(false);
     alert('เพิ่มตำแหน่งใหม่สำเร็จ!');
   };
@@ -342,20 +374,9 @@ const handleSavePosition = async (data: NewDeviceInput) => {
     navigate(`/devices/${device.type}?id=${encodeURIComponent(device.id)}`);
   };
 
-  const handleReportFromMap = async (device: Device) => {
-    try {
-      await saveComplaint({
-        deviceId: device.id,
-        deviceType: device.type,
-        deviceName: device.name,
-        location: `${device.lat.toFixed(6)}, ${device.lng.toFixed(6)}`,
-        status: statusLabels[device.status],
-      });
-      alert(`บันทึกเรื่องร้องเรียนเรียบร้อย\n\nรหัสอุปกรณ์: ${device.id}\nชื่อ: ${device.name}\nสถานะ: ${statusLabels[device.status]}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการบันทึก';
-      alert(`บันทึกเรื่องร้องเรียนไม่สำเร็จ: ${message}`);
-    }
+  const handleReportFromMap = (device: Device) => {
+    if (reportTarget !== null) return;
+    setReportTarget(device);
   };
 
   const activeMenu = useMemo<'overview' | 'devices'>(() => {
@@ -439,6 +460,7 @@ const handleSavePosition = async (data: NewDeviceInput) => {
                 onComplaintSubmitted={() => {
                   // no-op hook for future analytics
                 }}
+                onOpenReport={handleReportFromMap}
               />
             }
           />
@@ -458,6 +480,19 @@ const handleSavePosition = async (data: NewDeviceInput) => {
         }}
         initialLat={tempLat}
         initialLng={tempLng}
+      />
+
+      <ReportFormModal
+        isOpen={reportTarget !== null}
+        onClose={() => setReportTarget(null)}
+        deviceId={reportTarget?.id ?? ''}
+        deviceType={reportTarget?.type ?? 'streetlight'}
+        deviceName={reportTarget?.name ?? '-'}
+        location={reportTarget ? `${reportTarget.lat.toFixed(6)}, ${reportTarget.lng.toFixed(6)}` : '-'}
+        status={reportTarget ? statusLabels[reportTarget.status] : '-'}
+        onSubmitted={() => {
+          // no-op hook for future analytics
+        }}
       />
     </div>
   );

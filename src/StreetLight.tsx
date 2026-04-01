@@ -9,6 +9,7 @@ interface StreetLightProps {
   refreshing: boolean;
   onNavigateOverview: () => void;
   onComplaintSubmitted: () => void;
+  onOpenReport: (device: Device) => void;
 }
 
 function StreetLight(props: StreetLightProps) {

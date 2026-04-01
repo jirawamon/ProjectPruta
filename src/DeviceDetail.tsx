@@ -6,7 +6,7 @@ import './durablearticles.css';
 import { getStatusBadgeClass, statusColors, statusLabels, type DeviceStatus } from './status';
 import ReportButton from './ReportButton';
 import type { Device, DeviceType } from './types';
-import { fetchDeviceComplaints, updateDeviceData } from './lib/data';
+import { fetchDeviceComplaints, fetchDeviceEditLogs, type DeviceEditHistoryItem, updateDeviceData } from './lib/data';
 
 const iconDefaultPrototype = (L.Icon.Default as any).prototype;
 delete iconDefaultPrototype._getIconUrl;
@@ -25,7 +25,25 @@ interface DeviceDetailProps {
   refreshing: boolean;
   onNavigateOverview: () => void;
   onComplaintSubmitted: () => void;
+  onOpenReport: (device: Device) => void;
 }
+
+interface ComplaintHistoryItem {
+  status: string;
+  description: string | null;
+  created_at: string | null;
+  image_url?: string | null;
+}
+
+type OptimisticEdit = {
+  name: string;
+  status: DeviceStatus;
+};
+
+type ToastState = {
+  message: string;
+  tone: 'success' | 'error' | 'info';
+};
 
 type TypeConfig = { title: string; subtitle: string; icon: string; listIcon: ReactNode; };
 
@@ -41,7 +59,7 @@ function toLatLng(device: Device): [number, number] | null {
 }
 
 function DeviceDetail({
-  type, devices, selectedId, onSelect, onRefresh, refreshing, onNavigateOverview, onComplaintSubmitted,
+  type, devices, selectedId, onSelect, onRefresh, refreshing, onNavigateOverview, onComplaintSubmitted, onOpenReport,
 }: DeviceDetailProps) {
   const config = TYPE_CONFIG[type];
   const filteredDevices = useMemo(() => devices.filter((device) => device.type === type), [devices, type]);
@@ -53,7 +71,8 @@ function DeviceDetail({
 
   // --- State ใหม่สำหรับ Tabs, History และ Edit Mode ---
   const [activeTab, setActiveTab] = useState<'detail' | 'history'>('detail');
-  const [historyList, setHistoryList] = useState<any[]>([]);
+  const [historyList, setHistoryList] = useState<ComplaintHistoryItem[]>([]);
+  const [editHistoryList, setEditHistoryList] = useState<DeviceEditHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
@@ -61,14 +80,49 @@ function DeviceDetail({
   const [editName, setEditName] = useState('');
   const [editStatus, setEditStatus] = useState<DeviceStatus>('normal');
   const [isSaving, setIsSaving] = useState(false);
+  const [optimisticEdits, setOptimisticEdits] = useState<Record<string, OptimisticEdit>>({});
+  const [toast, setToast] = useState<ToastState | null>(null);
+
+  const showToast = (message: string, tone: ToastState['tone']) => {
+    setToast({ message, tone });
+  };
+
+  useEffect(() => {
+    if (!toast) return;
+    const timerId = window.setTimeout(() => setToast(null), 2600);
+    return () => window.clearTimeout(timerId);
+  }, [toast]);
 
   useEffect(() => {
     if (selectedId) setCurrentId(selectedId);
     else if (!currentId && filteredDevices.length > 0) setCurrentId(filteredDevices[0].id);
   }, [selectedId, filteredDevices, currentId]);
 
+  const applyOptimisticEdit = (device: Device): Device => {
+    const patch = optimisticEdits[device.id];
+    if (!patch) return device;
+    return {
+      ...device,
+      name: patch.name,
+      status: patch.status,
+    };
+  };
+
+  const displayedDevices = useMemo(
+    () => filteredDevices.map((device) => applyOptimisticEdit(device)),
+    [filteredDevices, optimisticEdits],
+  );
+
   // สร้างตัวแปร selectedDevice
-  const selectedDevice = useMemo(() => filteredDevices.find((item) => item.id === currentId) ?? filteredDevices[0], [filteredDevices, currentId]);
+  const selectedDevice = useMemo(
+    () => displayedDevices.find((item) => item.id === currentId) ?? displayedDevices[0],
+    [displayedDevices, currentId],
+  );
+
+  const selectedBaseDevice = useMemo(
+    () => filteredDevices.find((item) => item.id === currentId) ?? filteredDevices[0],
+    [filteredDevices, currentId],
+  );
 
   // --- ย้ายฟังก์ชันและ useEffect ที่เรียกใช้ selectedDevice มาไว้ตรงนี้ ---
   // เมื่อกดปุ่ม "แก้ไข" ให้ดึงค่าปัจจุบันมาใส่ฟอร์มรอไว้
@@ -81,18 +135,56 @@ function DeviceDetail({
 
   // ฟังก์ชันกดบันทึก
   const handleSaveEdit = async () => {
-    if (!selectedDevice) return;
+    if (!selectedDevice || !selectedBaseDevice) return;
+    const normalizedName = editName.trim();
+    if (!normalizedName) {
+      showToast('กรุณาระบุสถานที่ตั้ง', 'error');
+      return;
+    }
+
+    const rollbackName = selectedBaseDevice.name;
+    const rollbackStatus = selectedBaseDevice.status;
+    setOptimisticEdits((prev) => ({
+      ...prev,
+      [selectedBaseDevice.id]: {
+        name: normalizedName,
+        status: editStatus,
+      },
+    }));
+
     try {
       setIsSaving(true);
-      await updateDeviceData(selectedDevice.id, {
-        name: editName,
+      await updateDeviceData(selectedBaseDevice.id, {
+        ...selectedBaseDevice,
+        name: normalizedName,
         status: editStatus,
+      }, {
+        changedBy: 'web-user',
+        note: 'แก้ไขจาก Device Detail',
+        before: {
+          name: rollbackName,
+          status: rollbackStatus,
+        },
       });
-      alert('บันทึกการแก้ไขเรียบร้อยแล้ว');
+      showToast('บันทึกการแก้ไขเรียบร้อยแล้ว', 'success');
       setIsEditing(false); // ปิดโหมดแก้ไข
       onRefresh(); // สั่งรีเฟรชข้อมูลให้ตารางอัปเดต
     } catch (error) {
-      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+      setOptimisticEdits((prev) => {
+        const next = { ...prev };
+        delete next[selectedBaseDevice.id];
+        return next;
+      });
+      setEditName(rollbackName);
+      setEditStatus(rollbackStatus);
+      const message = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการบันทึกข้อมูล';
+      const isPermissionIssue = message.includes('42501') || message.toLowerCase().includes('permission denied');
+      showToast(
+        isPermissionIssue
+          ? 'บันทึกไม่สำเร็จ: สิทธิ์ฐานข้อมูลไม่เพียงพอ (RLS/Policy)'
+          : `บันทึกไม่สำเร็จ: ${message}`,
+        'error',
+      );
       console.error(error);
     } finally {
       setIsSaving(false);
@@ -112,9 +204,16 @@ function DeviceDetail({
 
   const loadHistory = async (id: string) => {
     setLoadingHistory(true);
-    const data = await fetchDeviceComplaints(id);
-    setHistoryList(data);
-    setLoadingHistory(false);
+    try {
+      const [complaints, editLogs] = await Promise.all([
+        fetchDeviceComplaints(id),
+        fetchDeviceEditLogs(id),
+      ]);
+      setHistoryList(complaints as ComplaintHistoryItem[]);
+      setEditHistoryList(editLogs);
+    } finally {
+      setLoadingHistory(false);
+    }
   };
 
   // แผนที่ทำงานเหมือนเดิม (ย่อโค้ดเพื่อความกระชับ)
@@ -126,9 +225,15 @@ function DeviceDetail({
     if (!mapRef.current) {
       const map = L.map(mapContainerRef.current).setView(latLng, 16);
       mapRef.current = map;
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        crossOrigin: true,
+      }).addTo(map);
+      window.setTimeout(() => {
+        map.invalidateSize();
+      }, 120);
     } else {
       mapRef.current.setView(latLng, 16);
+      mapRef.current.invalidateSize();
     }
 
     if (markerRef.current) markerRef.current.remove();
@@ -175,6 +280,27 @@ function DeviceDetail({
 
   return (
     <div className="sl-container">
+      {toast && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '16px',
+            right: '16px',
+            zIndex: 21000,
+            minWidth: '260px',
+            maxWidth: '420px',
+            padding: '12px 14px',
+            borderRadius: '10px',
+            color: 'white',
+            fontWeight: 700,
+            background: toast.tone === 'success' ? '#16a34a' : toast.tone === 'error' ? '#dc2626' : '#0ea5e9',
+            boxShadow: '0 10px 20px rgba(2, 6, 23, 0.25)',
+          }}
+        >
+          {toast.message}
+        </div>
+      )}
+
       <div className="sl-header">
         <div className="header-row">
           <div><h2>{config.title}</h2><p>{config.subtitle}</p></div>
@@ -192,7 +318,7 @@ function DeviceDetail({
             {config.listIcon}<h3>รายการ ({filteredDevices.length})</h3>
           </div>
           <div className="sl-list-content">
-            {filteredDevices.map((item) => (
+            {displayedDevices.map((item) => (
               <div key={item.id} onClick={() => onSelect(item.id)} className={`sl-card ${selectedDevice?.id === item.id ? 'active' : ''}`}>
                 <div className="sl-card-row">
                   <span className="sl-id">{item.id}</span>
@@ -307,9 +433,7 @@ function DeviceDetail({
                     deviceName={selectedDevice.name}
                     location={`${selectedDevice.lat.toFixed(6)}, ${selectedDevice.lng.toFixed(6)}`}
                     status={statusLabels[selectedDevice.status]}
-                    onSubmitted={() => {
-                      onComplaintSubmitted();
-                    }}
+                    onOpenReport={() => onOpenReport(selectedDevice)}
                   />
                 </>
               )}
@@ -337,6 +461,44 @@ function DeviceDetail({
                             </span>
                           </div>
                           <p style={{ margin: 0, fontSize: '0.9rem', color: '#64748b' }}>รายละเอียด: {historyItem.description || '-'}</p>
+                          {historyItem.image_url && (
+                            <a href={historyItem.image_url} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '10px' }}>
+                              <img
+                                src={historyItem.image_url}
+                                alt="รูปแนบการร้องเรียน"
+                                style={{ width: '100%', maxWidth: '260px', borderRadius: '10px', border: '1px solid #e2e8f0' }}
+                              />
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <h3 style={{ fontSize: '1.1rem', color: '#1e293b', marginTop: '20px', marginBottom: '16px', borderBottom: '2px solid #f1f5f9', paddingBottom: '8px' }}>ประวัติการแก้ไขข้อมูล</h3>
+                  {editHistoryList.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '20px', background: '#f8fafc', borderRadius: '12px', border: '1px dashed #cbd5e1', color: '#64748b' }}>
+                      ยังไม่มีประวัติการแก้ไขสถานที่ตั้ง/สถานะ
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {editHistoryList.map((logItem) => (
+                        <div key={logItem.id} style={{ padding: '16px', background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', gap: '12px' }}>
+                            <strong style={{ color: '#334155' }}>ผู้แก้ไข: {logItem.changed_by || 'ไม่ระบุ'}</strong>
+                            <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>
+                              {logItem.created_at ? new Date(logItem.created_at).toLocaleString('th-TH') : 'ไม่ระบุเวลา'}
+                            </span>
+                          </div>
+                          <p style={{ margin: 0, fontSize: '0.9rem', color: '#64748b' }}>
+                            สถานที่ตั้ง: {logItem.before_name || '-'} → {logItem.after_name || '-'}
+                          </p>
+                          <p style={{ margin: '4px 0 0 0', fontSize: '0.9rem', color: '#64748b' }}>
+                            สถานะ: {logItem.before_status || '-'} → {logItem.after_status || '-'}
+                          </p>
+                          {logItem.note && (
+                            <p style={{ margin: '6px 0 0 0', fontSize: '0.85rem', color: '#475569' }}>หมายเหตุ: {logItem.note}</p>
+                          )}
                         </div>
                       ))}
                     </div>

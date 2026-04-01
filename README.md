@@ -64,12 +64,32 @@ npm run dev
 ```bash
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_SUPABASE_COMPLAINT_BUCKET=complaint-images
 ```
 
 หมายเหตุ
 
 - ถ้าไม่ตั้งค่า Supabase ระบบจะแสดงข้อมูลจากแหล่งข้อมูลเดิมได้ตามปกติ
 - ฟังก์ชันบันทึกลงฐานข้อมูลจะถูกข้ามโดยอัตโนมัติเมื่อ env ไม่ครบ
+- สำหรับระบบแนบรูป complaint สามารถเปลี่ยนชื่อ bucket ได้ด้วย `VITE_SUPABASE_COMPLAINT_BUCKET`
+
+## Supabase Migration (ระบบแนบรูป)
+
+มีไฟล์ migration สำหรับเพิ่มคอลัมน์รูปและตั้งค่า Storage แล้วที่:
+
+- supabase/migrations/20260401_add_complaint_image_and_storage.sql
+
+สิ่งที่ migration นี้ทำ:
+
+- เพิ่มคอลัมน์ `public.complaints.image_url` (ถ้ายังไม่มี)
+- สร้าง bucket `complaint-images` (public) ถ้ายังไม่มี
+- ตั้งข้อจำกัดไฟล์: ไม่เกิน 5MB และรองรับ `image/jpeg`, `image/png`, `image/webp`
+- สร้าง policy สำหรับอัปโหลด/แก้ไข/ลบไฟล์ใน bucket นี้
+
+การรัน migration:
+
+- ผ่าน Supabase SQL Editor: คัดลอก SQL ในไฟล์แล้วรัน
+- หรือใช้ Supabase CLI (ถ้าติดตั้ง): `supabase db push`
 
 ## คำสั่งที่ใช้บ่อย
 

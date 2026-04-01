@@ -1,5 +1,45 @@
 # 📝 Change Log - ระบบผังเมืองดิจิทัลเทศบาล
 
+## 🗓️ วันที่ 1 เมษายน 2026
+
+### ✅ สรุปงานที่ทำรอบล่าสุด
+
+#### 🔄 Hybrid Data Persistence (Sheets + Supabase)
+- ปรับ `fetchAllDevices()` ให้ข้อมูลจาก Supabase ทับข้อมูลจาก Google Sheets ด้วย key `type:id`
+  - แก้ปัญหาแก้ไขข้อมูลแล้วเด้งกลับค่าเดิมจาก Sheets
+  - ทำให้ Supabase เป็นแหล่งข้อมูลปัจจุบัน (Current Truth)
+
+#### ✍️ โหมดแก้ไขข้อมูลอุปกรณ์ (สถานที่ตั้ง/สถานะ)
+- ปรับ `updateDeviceData()` ให้ปลอดภัยขึ้น
+  - ไม่ส่งค่า `undefined` ไป update
+  - รองรับ update ด้วยทั้ง `device_code` และ `id`
+  - เพิ่ม fallback insert หลายรูปแบบเพื่อรองรับ schema ต่างกันระหว่าง legacy/modern
+- เพิ่ม validation ในหน้า `DeviceDetail`
+  - บังคับกรอกสถานที่ตั้งก่อนบันทึก
+
+#### ⚡ Optimistic UI + Rollback
+- เพิ่ม optimistic update ใน `DeviceDetail`
+  - ผู้ใช้เห็นชื่อสถานที่และสถานะเปลี่ยนทันทีเมื่อกดบันทึก
+  - ถ้าบันทึกไม่สำเร็จจะ rollback กลับค่าเดิมอัตโนมัติ
+
+#### 🔔 UX ปรับปรุง: เปลี่ยน Alert เป็น Toast
+- เปลี่ยนข้อความแจ้งเตือนการบันทึกจาก `alert()` เป็น toast แบบ non-blocking
+  - แจ้งเตือนสำเร็จ/ผิดพลาดโดยไม่บล็อกการใช้งานหน้า
+  - แสดงข้อความ error จาก backend ได้ละเอียดขึ้น
+  - ตรวจจับกรณีสิทธิ์ไม่พอ (RLS/Policy) และแจ้งข้อความเฉพาะ
+
+#### 🧾 History Logs สำหรับการแก้ไขข้อมูล
+- เพิ่มระบบบันทึกประวัติการแก้ไขอุปกรณ์ใน data layer
+  - เก็บ `before_name`, `after_name`, `before_status`, `after_status`, `changed_by`, `note`, `created_at`
+  - เขียน log แบบ non-fatal: ถ้าตาราง log ยังไม่พร้อม การบันทึกอุปกรณ์หลักยังทำงานต่อได้
+- เพิ่มการแสดงผลในแท็บประวัติของ `DeviceDetail`
+  - โหลดประวัติร้องเรียนและประวัติแก้ไขข้อมูลพร้อมกัน
+  - แสดงผู้แก้ไข เวลา และ before/after ชัดเจน
+
+#### 🧪 Verification
+- ตรวจ TypeScript errors ในไฟล์ที่แก้: ผ่าน
+- ตรวจ production build (`npm run build`): ผ่าน
+
 ## 🗓️ วันที่ 24 มีนาคม 2026
 
 ### 🚀 ปรับระบบครั้งใหญ่สู่ Production-ready
