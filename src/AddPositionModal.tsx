@@ -3,14 +3,12 @@ import { X, MapPin, Save } from 'lucide-react';
 import './AddPositionModal.css';
 import type { DeviceStatus } from './status';
 import { getDeviceTypeMeta, KNOWN_DEVICE_TYPE_ORDER } from './deviceTypeMeta';
-import {
-  createCustomDeviceType,
-  deleteCustomDeviceType,
-  normalizeCustomDeviceTypeCode,
-  updateCustomDeviceType,
-  type CustomDeviceType,
-} from './lib/customDeviceTypes';
+import type { CustomDeviceType } from './lib/customDeviceTypes';
+import { REQUIRED_DEVICE_COLUMNS } from './lib/customDeviceSchemas';
+import { getSchemaHeaders } from './lib/googleSheetsSchema';
 import type { DeviceType, NewDeviceInput } from './types';
+
+const DEFAULT_SCHEMA_SPREADSHEET_ID = '1o0HsgmEeKRmKO6mUKGrppjgAIsFWlfJ87U-YPcpTMYo';
 
 interface AddPositionModalProps {
   isOpen: boolean;
@@ -51,16 +49,8 @@ function toDeviceStatus(value: string): DeviceStatus {
 }
 
 
-function AddPositionModal({ isOpen, onClose, onSave, customTypes, onCustomTypesChanged, initialLat = 0, initialLng = 0 }: AddPositionModalProps) {
+function AddPositionModal({ isOpen, onClose, onSave, customTypes, onCustomTypesChanged: _onCustomTypesChanged, initialLat = 0, initialLng = 0 }: AddPositionModalProps) {
   const [type, setType] = useState<DeviceType>('streetlight');
-  const [customTypeItems, setCustomTypeItems] = useState<CustomDeviceType[]>(customTypes);
-  const [newTypeCode, setNewTypeCode] = useState('');
-  const [newTypeLabel, setNewTypeLabel] = useState('');
-  const [newTypeIcon, setNewTypeIcon] = useState('🧩');
-  const [editingTypeId, setEditingTypeId] = useState<string | null>(null);
-  const [editingTypeLabel, setEditingTypeLabel] = useState('');
-  const [editingTypeIcon, setEditingTypeIcon] = useState('');
-  const [savingTypeId, setSavingTypeId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState<DeviceStatus>('normal');
@@ -80,11 +70,12 @@ function AddPositionModal({ isOpen, onClose, onSave, customTypes, onCustomTypesC
   const [speed, setSpeed] = useState('');
   const [pressure, setPressure] = useState('');
 
-  useEffect(() => {
-    setCustomTypeItems(customTypes);
-  }, [customTypes]);
+  const [customSchemaColumns, setCustomSchemaColumns] = useState<string[]>([]);
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>({});
+  const [loadingCustomSchema, setLoadingCustomSchema] = useState(false);
+  const [customSchemaError, setCustomSchemaError] = useState<string | null>(null);
 
-  const customDeviceTypeOptions: DeviceTypeOption[] = customTypeItems.map((item) => ({
+  const customDeviceTypeOptions: DeviceTypeOption[] = customTypes.map((item) => ({
     value: item.typeCode,
     label: item.label,
     icon: item.icon,
@@ -98,6 +89,88 @@ function AddPositionModal({ isOpen, onClose, onSave, customTypes, onCustomTypesC
     setLat(initialLat);
     setLng(initialLng);
   }, [initialLat, initialLng, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const isCustom = type !== 'streetlight' && type !== 'wifi' && type !== 'hydrant';
+    if (!isCustom) {
+      setCustomSchemaColumns([]);
+      setCustomFieldValues({});
+      setLoadingCustomSchema(false);
+      setCustomSchemaError(null);
+      return;
+    }
+
+    const appsScriptUrl = (import.meta.env.VITE_APPS_SCRIPT_SCHEMA_URL as string | undefined) ?? '';
+    const token = (import.meta.env.VITE_APPS_SCRIPT_SCHEMA_TOKEN as string | undefined) ?? '';
+    const spreadsheetId =
+      (import.meta.env.VITE_DEVICE_SCHEMA_SPREADSHEET_ID as string | undefined) ?? DEFAULT_SCHEMA_SPREADSHEET_ID;
+
+    if (!appsScriptUrl.trim()) {
+      setCustomSchemaColumns([]);
+      setCustomFieldValues({});
+      setLoadingCustomSchema(false);
+      setCustomSchemaError('ยังไม่ได้ตั้งค่า VITE_APPS_SCRIPT_SCHEMA_URL');
+      return;
+    }
+
+    const excludedSet = new Set(REQUIRED_DEVICE_COLUMNS.map((col) => col.trim().toUpperCase()));
+    let disposed = false;
+    setLoadingCustomSchema(true);
+    setCustomSchemaError(null);
+
+    void (async () => {
+      try {
+        const headers = await getSchemaHeaders({
+          appsScriptUrl,
+          token,
+          spreadsheetId,
+          sheetName: String(type),
+        });
+
+        const columns = headers
+          .map((h) => h.trim())
+          .filter((h) => h.length > 0)
+          // show any column beyond required ones (case-insensitive)
+          .filter((h) => !excludedSet.has(h.toUpperCase()));
+
+        if (disposed) return;
+        setCustomSchemaColumns(columns);
+        setCustomFieldValues((prev) => {
+          const next: Record<string, string> = { ...prev };
+          for (const col of columns) {
+            if (typeof next[col] !== 'string') next[col] = '';
+          }
+          // remove keys no longer present
+          for (const key of Object.keys(next)) {
+            if (!columns.includes(key)) delete next[key];
+          }
+          return next;
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn('[AddPositionModal] failed to load custom schema headers:', { message, error });
+        if (disposed) return;
+        setCustomSchemaColumns([]);
+        setCustomFieldValues({});
+        setCustomSchemaError(message || 'โหลดคอลัมน์ไม่สำเร็จ');
+      } finally {
+        if (!disposed) setLoadingCustomSchema(false);
+      }
+    })();
+
+    return () => {
+      disposed = true;
+    };
+  }, [type, isOpen]);
+
+  const updateCustomField = (key: string, value: string) => {
+    setCustomFieldValues((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,7 +201,8 @@ function AddPositionModal({ isOpen, onClose, onSave, customTypes, onCustomTypesC
       radiusMeters: useRadiusPin ? sanitizedRadius : undefined,
       // ส่งข้อมูลเฉพาะทางไปด้วย
       lampType, bulbType, watt, owner,
-      isp, speed, pressure
+      isp, speed, pressure,
+      customFields: (type !== 'streetlight' && type !== 'wifi' && type !== 'hydrant') ? customFieldValues : undefined,
     });
 
     // Reset form
@@ -136,116 +210,10 @@ function AddPositionModal({ isOpen, onClose, onSave, customTypes, onCustomTypesC
     setUseRadiusPin(true); setUseSketchPin(false); setRadiusMeters(100);
     setLampType(''); setBulbType(''); setWatt(''); setOwner('');
     setIsp(''); setSpeed(''); setPressure('');
-    setEditingTypeId(null);
-    setEditingTypeLabel('');
-    setEditingTypeIcon('');
+    setCustomSchemaColumns([]);
+    setCustomFieldValues({});
     
     onClose();
-  };
-
-  const handleAddCustomType = async () => {
-    const code = normalizeCustomDeviceTypeCode(newTypeCode);
-    const label = newTypeLabel.trim();
-
-    if (!code) {
-      alert('กรุณากรอกรหัสประเภทเป็นภาษาอังกฤษ ตัวเลข หรือ -/_');
-      return;
-    }
-
-    if (!label) {
-      alert('กรุณากรอกชื่อประเภทที่ต้องการแสดงผล');
-      return;
-    }
-
-    const exists = [...baseDeviceTypes, ...customDeviceTypeOptions].some((item) => item.value === code);
-    if (exists) {
-      alert('รหัสประเภทนี้มีอยู่แล้ว');
-      return;
-    }
-
-    try {
-      setSavingTypeId(code);
-      const createdType = await createCustomDeviceType({
-        typeCode: code,
-        label,
-        icon: newTypeIcon.trim() || '🧩',
-      });
-      setCustomTypeItems((prev) => [
-        ...prev,
-        createdType,
-      ]);
-      setType(code);
-      setNewTypeCode('');
-      setNewTypeLabel('');
-      setNewTypeIcon('🧩');
-      onCustomTypesChanged();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'ไม่สามารถเพิ่มประเภทอุปกรณ์ได้';
-      alert(message);
-    } finally {
-      setSavingTypeId(null);
-    }
-  };
-
-  const beginEditCustomType = (item: CustomDeviceType) => {
-    setEditingTypeId(item.id);
-    setEditingTypeLabel(item.label);
-    setEditingTypeIcon(item.icon);
-  };
-
-  const cancelEditCustomType = () => {
-    setEditingTypeId(null);
-    setEditingTypeLabel('');
-    setEditingTypeIcon('');
-  };
-
-  const handleUpdateCustomType = async (item: CustomDeviceType) => {
-    const label = editingTypeLabel.trim();
-    const icon = editingTypeIcon.trim();
-
-    if (!label) {
-      alert('กรุณากรอกชื่อประเภท');
-      return;
-    }
-
-    try {
-      setSavingTypeId(item.id);
-      await updateCustomDeviceType(item.id, {
-        label,
-        icon: icon || '🧩',
-      });
-      setCustomTypeItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, label, icon: icon || '🧩' } : entry)));
-      cancelEditCustomType();
-      onCustomTypesChanged();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'ไม่สามารถแก้ไขประเภทอุปกรณ์ได้';
-      alert(message);
-    } finally {
-      setSavingTypeId(null);
-    }
-  };
-
-  const handleDeleteCustomType = async (item: CustomDeviceType) => {
-    const confirmed = window.confirm(`ต้องการลบประเภท "${item.label}" ใช่หรือไม่`);
-    if (!confirmed) return;
-
-    try {
-      setSavingTypeId(item.id);
-      await deleteCustomDeviceType(item.id);
-      setCustomTypeItems((prev) => prev.filter((entry) => entry.id !== item.id));
-      if (type === item.typeCode) {
-        setType('streetlight');
-      }
-      if (editingTypeId === item.id) {
-        cancelEditCustomType();
-      }
-      onCustomTypesChanged();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'ไม่สามารถลบประเภทอุปกรณ์ได้';
-      alert(message);
-    } finally {
-      setSavingTypeId(null);
-    }
   };
 
   if (!isOpen) return null;
@@ -264,87 +232,7 @@ function AddPositionModal({ isOpen, onClose, onSave, customTypes, onCustomTypesC
         </div>
 
         <form onSubmit={handleSubmit} className="modal-body">
-          <div className="form-group custom-type-box">
-            <label>เพิ่มประเภทอุปกรณ์ใหม่</label>
-            <div className="custom-type-grid">
-              <input
-                type="text"
-                value={newTypeCode}
-                onChange={(e) => setNewTypeCode(e.target.value)}
-                placeholder="รหัสประเภท เช่น cctv"
-                className="form-input"
-              />
-              <input
-                type="text"
-                value={newTypeLabel}
-                onChange={(e) => setNewTypeLabel(e.target.value)}
-                placeholder="ชื่อที่แสดง เช่น กล้องวงจรปิด"
-                className="form-input"
-              />
-              <input
-                type="text"
-                value={newTypeIcon}
-                onChange={(e) => setNewTypeIcon(e.target.value)}
-                placeholder="ไอคอน เช่น 📹"
-                className="form-input"
-                maxLength={2}
-              />
-              <button type="button" className="btn-secondary add-type-btn" onClick={() => void handleAddCustomType()} disabled={savingTypeId === normalizeCustomDeviceTypeCode(newTypeCode)}>
-                {savingTypeId === normalizeCustomDeviceTypeCode(newTypeCode) ? 'กำลังบันทึก...' : 'เพิ่มประเภท'}
-              </button>
-            </div>
-          </div>
 
-          {customTypes.length > 0 && (
-            <div className="form-group custom-type-box">
-              <label>จัดการประเภทอุปกรณ์ custom</label>
-              <div className="custom-type-list">
-                {customTypes.map((item) => (
-                  <div key={item.id} className="custom-type-row">
-                    {editingTypeId === item.id ? (
-                      <>
-                        <input
-                          type="text"
-                          className="form-input"
-                          value={editingTypeIcon}
-                          onChange={(e) => setEditingTypeIcon(e.target.value)}
-                          maxLength={2}
-                          style={{ maxWidth: '72px' }}
-                        />
-                        <input
-                          type="text"
-                          className="form-input"
-                          value={editingTypeLabel}
-                          onChange={(e) => setEditingTypeLabel(e.target.value)}
-                          placeholder="ชื่อประเภท"
-                        />
-                        <button type="button" className="btn-primary custom-type-action" onClick={() => void handleUpdateCustomType(item)} disabled={savingTypeId === item.id}>
-                          {savingTypeId === item.id ? 'กำลังบันทึก...' : 'บันทึก'}
-                        </button>
-                        <button type="button" className="btn-secondary custom-type-action" onClick={cancelEditCustomType} disabled={savingTypeId === item.id}>
-                          ยกเลิก
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="custom-type-chip">
-                          <span>{item.icon}</span>
-                          <span>{item.label}</span>
-                        </div>
-                        <div className="custom-type-code">{item.typeCode}</div>
-                        <button type="button" className="btn-secondary custom-type-action" onClick={() => beginEditCustomType(item)} disabled={savingTypeId !== null}>
-                          แก้ชื่อ
-                        </button>
-                        <button type="button" className="btn-secondary custom-type-action" onClick={() => void handleDeleteCustomType(item)} disabled={savingTypeId === item.id}>
-                          ลบ
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
           <div className="form-group">
             <label>ประเภทอุปกรณ์ <span className="required">*</span></label>
@@ -391,7 +279,30 @@ function AddPositionModal({ isOpen, onClose, onSave, customTypes, onCustomTypesC
 
             {type !== 'streetlight' && type !== 'wifi' && type !== 'hydrant' && (
               <div>
-                <span className="form-hint">ประเภทนี้จะถูกบันทึกเป็นหมวดใหม่ และใช้ข้อมูลหมายเหตุร่วมกับสถานะ/พิกัด</span>
+                {loadingCustomSchema && <span className="form-hint">กำลังโหลดคอลัมน์จาก Google Sheets...</span>}
+                {!loadingCustomSchema && customSchemaColumns.length === 0 && (
+                  <span className="form-hint">
+                    {customSchemaError
+                      ? `โหลดคอลัมน์ไม่สำเร็จ: ${customSchemaError}`
+                      : 'ไม่พบคอลัมน์ข้อมูลจำเพาะในชีตนี้'}
+                  </span>
+                )}
+                {!loadingCustomSchema && customSchemaColumns.length > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    {customSchemaColumns.map((col) => (
+                      <div key={col}>
+                        <span className="form-hint">{col}</span>
+                        <input
+                          type="text"
+                          value={customFieldValues[col] ?? ''}
+                          onChange={(e) => updateCustomField(col, e.target.value)}
+                          placeholder={`เช่น ${col}`}
+                          className="form-input"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

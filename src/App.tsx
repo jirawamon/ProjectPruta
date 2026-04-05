@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Home, MapPin, List, ChevronUp, ChevronDown, Plus, Menu, X } from 'lucide-react';
+import { Home, MapPin, List, ChevronUp, ChevronDown, Plus, Menu, X, RefreshCw } from 'lucide-react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import './App.css';
 import './durablearticles.css';
 import { getStatusBadgeClass, statusLabels } from './status';
 import CityMap from './CityMap.tsx';
 import AddPositionModal from './AddPositionModal';
+import AddDeviceTableModal from './AddDeviceTableModal';
 import ReportFormModal from './ReportFormModal';
 import DeviceDetail from './DeviceDetail';
 import { getDeviceTypeMeta, isKnownDeviceType, KNOWN_DEVICE_TYPE_ORDER, parseCustomTypeFromDescription } from './deviceTypeMeta';
@@ -54,7 +55,7 @@ function OverviewPage({
       if (idxB !== -1) return 1;
       return typeA.localeCompare(typeB, 'th');
     });
-  }, [devices]);
+  }, [devices, customTypes]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
@@ -201,6 +202,7 @@ function DeviceRoutePage({
   onNavigateOverview,
   onComplaintSubmitted,
   onOpenReport,
+  onOpenAddDevice,
 }: {
   devices: Device[];
   customTypes: CustomDeviceType[];
@@ -209,6 +211,7 @@ function DeviceRoutePage({
   onNavigateOverview: () => void;
   onComplaintSubmitted: () => void;
   onOpenReport: (device: Device) => void;
+  onOpenAddDevice: () => void;
 }) {
   const params = useParams<{ type: string }>();
   const navigate = useNavigate();
@@ -216,6 +219,8 @@ function DeviceRoutePage({
 
   const availableTypes = useMemo(() => {
     const set = new Set<string>();
+    KNOWN_DEVICE_TYPE_ORDER.forEach((item) => set.add(item));
+    customTypes.forEach((item) => set.add(item.typeCode));
     devices.forEach((item) => set.add(item.type));
 
     const known = KNOWN_DEVICE_TYPE_ORDER.filter((item) => set.has(item));
@@ -240,21 +245,34 @@ function DeviceRoutePage({
 
   return (
     <div className="device-page" style={{ padding: '20px', background: 'white', height: '100%', overflowY: 'auto' }}>
-      <div className="device-tabs">
-        {availableTypes.map((tabType) => {
-          const customMeta = customTypes.find((item) => item.typeCode === tabType);
-          const firstDevice = devices.find((item) => item.type === tabType);
-          const meta = getDeviceTypeMeta(tabType, customMeta ?? parseCustomTypeFromDescription(firstDevice?.description));
-          return (
-            <button
-              key={tabType}
-              className={type === tabType ? 'active' : ''}
-              onClick={() => navigate(`/devices/${encodeURIComponent(tabType)}`)}
-            >
-              {meta.label}
-            </button>
-          );
-        })}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+        <div className="device-tabs">
+          {availableTypes.map((tabType) => {
+            const customMeta = customTypes.find((item) => item.typeCode === tabType);
+            const firstDevice = devices.find((item) => item.type === tabType);
+            const meta = getDeviceTypeMeta(tabType, customMeta ?? parseCustomTypeFromDescription(firstDevice?.description));
+            return (
+              <button
+                key={tabType}
+                className={type === tabType ? 'active' : ''}
+                onClick={() => navigate(`/devices/${encodeURIComponent(tabType)}`)}
+              >
+                {meta.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button type="button" onClick={onOpenAddDevice} className="btn-add-device">
+            <Plus size={16} />
+            <span>เพิ่มอุปกรณ์</span>
+          </button>
+          <button onClick={onRefresh} className="btn-update" disabled={refreshing}>
+            <RefreshCw size={16} className={refreshing ? 'spin-anim' : ''} />
+            <span>{refreshing ? 'กำลังโหลด...' : 'อัปเดตข้อมูล'}</span>
+          </button>
+        </div>
       </div>
       <div className="device-content">
         <DeviceDetail
@@ -286,6 +304,7 @@ function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [reportTarget, setReportTarget] = useState<Device | null>(null);
   const [customTypes, setCustomTypes] = useState<CustomDeviceType[]>([]);
+  const [isAddDeviceOpen, setIsAddDeviceOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -531,6 +550,7 @@ function App() {
                   // no-op hook for future analytics
                 }}
                 onOpenReport={handleReportFromMap}
+                onOpenAddDevice={() => setIsAddDeviceOpen(true)}
               />
             }
           />
@@ -567,6 +587,15 @@ function App() {
         customTypes={customTypes}
         onSubmitted={() => {
           // no-op hook for future analytics
+        }}
+      />
+
+      <AddDeviceTableModal
+        isOpen={isAddDeviceOpen}
+        onClose={() => setIsAddDeviceOpen(false)}
+        customTypes={customTypes}
+        onCreated={() => {
+          void reloadCustomTypes();
         }}
       />
     </div>

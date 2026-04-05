@@ -630,6 +630,15 @@ export async function saveDevicePosition(input: NewDeviceInput): Promise<Device>
     if (input.pressure) extraDetails.push(`แรงดันน้ำ: ${input.pressure}`);
   }
 
+  if (input.customFields && typeof input.customFields === 'object') {
+    for (const [key, value] of Object.entries(input.customFields)) {
+      const normalizedKey = String(key).trim();
+      const normalizedValue = String(value ?? '').trim();
+      if (!normalizedKey || !normalizedValue) continue;
+      extraDetails.push(`${normalizedKey}: ${normalizedValue}`);
+    }
+  }
+
   if (input.customTypeLabel) {
     extraDetails.push(`[ประเภท:${input.customTypeLabel}]`);
   }

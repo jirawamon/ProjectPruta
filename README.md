@@ -73,6 +73,33 @@ VITE_SUPABASE_COMPLAINT_BUCKET=complaint-images
 - ฟังก์ชันบันทึกลงฐานข้อมูลจะถูกข้ามโดยอัตโนมัติเมื่อ env ไม่ครบ
 - สำหรับระบบแนบรูป complaint สามารถเปลี่ยนชื่อ bucket ได้ด้วย `VITE_SUPABASE_COMPLAINT_BUCKET`
 
+### Google Sheets (สร้างแท็บ/คอลัมน์สำหรับอุปกรณ์ที่เพิ่มเอง)
+
+ฟีเจอร์ “เพิ่มอุปกรณ์” จะสร้างแท็บ (Sheet tab) ใหม่ และเขียนหัวคอลัมน์ที่แถว 1 (พร้อม freeze) ลงใน Google Sheets ผ่าน Google Apps Script Web App (เพื่อหลีกเลี่ยงการให้ frontend ไปแก้ schema/ใช้ OAuth โดยตรง)
+
+ตั้งค่า env เพิ่มเติมใน `.env`
+
+```bash
+VITE_APPS_SCRIPT_SCHEMA_URL=your_apps_script_web_app_url
+VITE_APPS_SCRIPT_SCHEMA_TOKEN=your_shared_token
+VITE_DEVICE_SCHEMA_SPREADSHEET_ID=your_spreadsheet_id
+```
+
+หมายเหตุ
+
+- `VITE_DEVICE_SCHEMA_SPREADSHEET_ID` ถ้าไม่ตั้งค่า จะ fallback ไปใช้ Spreadsheet ID ค่าเริ่มต้นในโค้ด
+- `VITE_APPS_SCRIPT_SCHEMA_TOKEN` จะถูกส่งไปให้ Apps Script ตรวจสอบ (เหมาะกับงานภายในองค์กร)
+
+การตั้งค่า Google Apps Script
+
+- ดูตัวอย่างสคริปต์ที่ [apps-script/DeviceSchema.gs](apps-script/DeviceSchema.gs)
+- สร้าง Apps Script project ใหม่ แล้ววางโค้ดจากไฟล์นี้
+- ตั้ง Script Property ชื่อ `TOKEN` ให้ตรงกับ `VITE_APPS_SCRIPT_SCHEMA_TOKEN`
+- Deploy เป็น Web App
+	- Execute as: Me (เจ้าของสคริปต์)
+	- Who has access: Anyone (หรือ Anyone within domain)
+- นำ URL ของ Web App มาใส่ใน `VITE_APPS_SCRIPT_SCHEMA_URL`
+
 
 ## คำสั่งที่ใช้บ่อย
 

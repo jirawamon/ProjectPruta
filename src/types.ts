@@ -43,7 +43,7 @@ export interface HydrantDevice extends BaseDevice {
   lastCheck?: string;
 }
 
-export type Device = StreetLightDevice | WifiDevice | HydrantDevice;
+export type Device = StreetLightDevice | WifiDevice | HydrantDevice | BaseDevice;
 
 export interface NewDeviceInput {
   type: DeviceType;
@@ -57,6 +57,9 @@ export interface NewDeviceInput {
   useRadiusPin: boolean;
   useSketchPin: boolean;
   radiusMeters?: number;
+
+  // For custom device types whose schema is defined in Google Sheets
+  customFields?: Record<string, string>;
   
   // --- ฟิลด์ใหม่ที่เพิ่มเข้ามาเพื่อความยืดหยุ่น ---
   lampType?: string;

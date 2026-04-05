@@ -252,6 +252,51 @@
     background-color: #f3f4f6;
 }
 
+/* =========================================
+   3.1 ปุ่มเพิ่มอุปกรณ์ (สีเหลือง)
+   ========================================= */
+
+.btn-add-device {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+
+    height: 42px;
+    min-width: 145px;
+    padding: 0 16px;
+    box-sizing: border-box;
+
+    background-color: #f59e0b;
+    border: 1px solid #f59e0b;
+    border-radius: 10px;
+    box-shadow: 0 6px 18px rgba(245, 158, 11, 0.25);
+
+    font-family: 'Prompt', sans-serif;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #0f172a;
+
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    outline: none;
+}
+
+.btn-add-device:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(245, 158, 11, 0.32);
+}
+
+.btn-add-device:active {
+    transform: translateY(0);
+}
+
+.btn-add-device:disabled {
+    opacity: 0.75;
+    cursor: wait;
+    transform: none;
+}
+
 /* --- ปุ่มสีแดง (สำหรับหน้าประปา fh-container) --- */
 .fh-container .btn-update {
     color: #dc2626;

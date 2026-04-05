@@ -1,4 +1,9 @@
 import { isSupabaseEnabled, supabase } from './supabase';
+import { isKnownDeviceType } from '../deviceTypeMeta';
+import { getSchemaHeaders, listSchemaSheets } from './googleSheetsSchema';
+import { REQUIRED_DEVICE_COLUMNS } from './customDeviceSchemas';
+
+const DEFAULT_SCHEMA_SPREADSHEET_ID = '1o0HsgmEeKRmKO6mUKGrppjgAIsFWlfJ87U-YPcpTMYo';
 
 export interface CustomDeviceType {
   id: string;
@@ -58,13 +63,72 @@ function mapRow(row: CustomDeviceTypeRow): CustomDeviceType {
 
 function ensureSupabase(): NonNullable<typeof supabase> {
   if (!isSupabaseEnabled || !supabase) {
-    throw new Error('Supabase is not configured');
+    throw new Error(
+      'Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env, then restart the dev server.',
+    );
   }
 
   return supabase;
 }
 
 export async function fetchCustomDeviceTypes(): Promise<CustomDeviceType[]> {
+  const appsScriptUrl = (import.meta.env.VITE_APPS_SCRIPT_SCHEMA_URL as string | undefined) ?? '';
+  const appsScriptToken = (import.meta.env.VITE_APPS_SCRIPT_SCHEMA_TOKEN as string | undefined) ?? '';
+  const spreadsheetId =
+    (import.meta.env.VITE_DEVICE_SCHEMA_SPREADSHEET_ID as string | undefined) ?? DEFAULT_SCHEMA_SPREADSHEET_ID;
+
+  // Prefer Google Sheets as source of truth when configured.
+  if (appsScriptUrl.trim()) {
+    try {
+      const sheets = await listSchemaSheets({
+        appsScriptUrl,
+        token: appsScriptToken,
+        spreadsheetId,
+      });
+
+      const requiredSet = new Set(REQUIRED_DEVICE_COLUMNS);
+
+      const candidates = sheets
+        .map((name) => name.trim())
+        .filter((name) => name.length > 0)
+        .filter((name) => !isKnownDeviceType(name));
+
+      const validated = await Promise.all(
+        candidates.map(async (sheetName) => {
+          try {
+            const headers = await getSchemaHeaders({
+              appsScriptUrl,
+              token: appsScriptToken,
+              spreadsheetId,
+              sheetName,
+            });
+            const headerSet = new Set(headers.map((h) => h.trim().toUpperCase()).filter(Boolean));
+            const ok = Array.from(requiredSet).every((col) => headerSet.has(col));
+            return ok ? sheetName : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return validated
+        .filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+        .sort((a, b) => a.localeCompare(b, 'th'))
+        .map((name) => ({
+          id: `sheet:${name}`,
+          typeCode: name,
+          label: name,
+          icon: '🧩',
+          color: '#6366f1',
+          isActive: true,
+          createdAt: null,
+          updatedAt: null,
+        }));
+    } catch (error) {
+      console.warn('[customDeviceTypes] Failed to load custom types from Google Sheets; falling back to Supabase:', error);
+    }
+  }
+
   if (!isSupabaseEnabled || !supabase) return [];
 
   const result = await (supabase.from('custom_device_types') as any)

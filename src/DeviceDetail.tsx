@@ -79,7 +79,7 @@ function toLatLng(device: Device): [number, number] | null {
 }
 
 function DeviceDetail({
-  type, devices, customTypes, selectedId, onSelect, onRefresh, refreshing, onNavigateOverview: _onNavigateOverview, onComplaintSubmitted: _onComplaintSubmitted, onOpenReport,
+  type, devices, customTypes, selectedId, onSelect, onRefresh, refreshing: _refreshing, onNavigateOverview: _onNavigateOverview, onComplaintSubmitted: _onComplaintSubmitted, onOpenReport,
 }: DeviceDetailProps) {
   const filteredDevices = useMemo(() => devices.filter((device) => device.type === type), [devices, type]);
   const config = getTypeConfig(type, customTypes.find((item) => item.typeCode === type) ?? null, filteredDevices[0]?.description);
@@ -275,26 +275,29 @@ function DeviceDetail({
 
   const renderDetailRows = (device: Device) => {
     if (device.type === 'streetlight') {
+      const streetlight = device as any;
       return (
         <>
-          <div><span className="sl-field-label">ประเภทโคม</span><p className="sl-field-value">{device.lampType || '-'}</p></div>
-          <div><span className="sl-field-label">หลอดไฟ</span><p className="sl-field-value">{device.bulbType || '-'}</p></div>
-          <div><span className="sl-field-label">กำลังไฟ</span><p className="sl-field-value">{device.watt || '-'}</p></div>
+          <div><span className="sl-field-label">ประเภทโคม</span><p className="sl-field-value">{streetlight.lampType || '-'}</p></div>
+          <div><span className="sl-field-label">หลอดไฟ</span><p className="sl-field-value">{streetlight.bulbType || '-'}</p></div>
+          <div><span className="sl-field-label">กำลังไฟ</span><p className="sl-field-value">{streetlight.watt || '-'}</p></div>
         </>
       );
     }
     if (device.type === 'wifi') {
+      const wifi = device as any;
       return (
         <>
-          <div><span className="sl-field-label">ผู้ให้บริการ</span><p className="sl-field-value">{device.isp || '-'}</p></div>
-          <div><span className="sl-field-label">ความเร็ว</span><p className="sl-field-value"><Signal size={16} style={{ display: 'inline' }} /> {device.speed || '-'}</p></div>
+          <div><span className="sl-field-label">ผู้ให้บริการ</span><p className="sl-field-value">{wifi.isp || '-'}</p></div>
+          <div><span className="sl-field-label">ความเร็ว</span><p className="sl-field-value"><Signal size={16} style={{ display: 'inline' }} /> {wifi.speed || '-'}</p></div>
         </>
       );
     }
     if (device.type === 'hydrant') {
+      const hydrant = device as any;
       return (
         <>
-          <div><span className="sl-field-label">ระดับแรงดันน้ำ</span><p className="sl-field-value"><Gauge size={16} style={{ display: 'inline' }} /> {device.pressure || '-'}</p></div>
+          <div><span className="sl-field-label">ระดับแรงดันน้ำ</span><p className="sl-field-value"><Gauge size={16} style={{ display: 'inline' }} /> {hydrant.pressure || '-'}</p></div>
         </>
       );
     }
@@ -328,10 +331,6 @@ function DeviceDetail({
       <div className="sl-header">
         <div className="header-row">
           <div><h2>{config.title}</h2><p>{config.subtitle}</p></div>
-          <button onClick={onRefresh} className="btn-update" disabled={refreshing}>
-            <RefreshCw size={16} className={refreshing ? 'spin-anim' : ''} />
-            <span>{refreshing ? 'กำลังโหลด...' : 'อัปเดตข้อมูล'}</span>
-          </button>
         </div>
       </div>
 
