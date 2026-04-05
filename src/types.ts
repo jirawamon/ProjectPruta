@@ -13,6 +13,7 @@ export interface BaseDevice {
   status: DeviceStatus;
   department: string;
   description?: string;
+  customFields?: Record<string, string>;
   deviceImageUrl?: string;
   rangeMeters?: number;
   sketchPin?: boolean;

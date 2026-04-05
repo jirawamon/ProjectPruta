@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Droplet, Gauge, Lightbulb, MapPin, RefreshCw, Signal, Wifi, Clock, Edit, Check, X } from 'lucide-react';
+import { Droplet, Gauge, Lightbulb, MapPin, RefreshCw, Signal, Wifi, Clock, Edit, Check, X, Trash2 } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './durablearticles.css';
@@ -8,7 +8,32 @@ import { getDeviceTypeMeta, isKnownDeviceType, parseCustomTypeFromDescription } 
 import ReportButton from './ReportButton';
 import type { Device, DeviceType } from './types';
 import type { CustomDeviceType } from './lib/customDeviceTypes';
-import { fetchDeviceComplaints, fetchDeviceEditLogs, type DeviceEditHistoryItem, updateDeviceData } from './lib/data';
+import { deleteDeviceData, fetchDeviceComplaints, fetchDeviceEditLogs, type DeviceEditHistoryItem, updateDeviceData } from './lib/data';
+import { findSchemaRow } from './lib/googleSheetsSchema';
+
+const BASE_SPEC_KEYS = new Set([
+  'LOCATION',
+  'LAT',
+  'LNG',
+  'LON',
+  'IMG_FILE',
+  'IMG_DATE',
+  'STATUS',
+  'STATUSDATE',
+  'RANGE',
+]);
+
+function normalizeText(value: unknown): string {
+  if (value === null || typeof value === 'undefined') return '';
+  return String(value).trim();
+}
+
+function toSpecEntries(fields: Record<string, string> | undefined): Array<[string, string]> {
+  if (!fields) return [];
+  return Object.entries(fields)
+    .map(([k, v]) => [normalizeText(k), normalizeText(v)] as [string, string])
+    .filter(([k, v]) => Boolean(k) && Boolean(v) && !BASE_SPEC_KEYS.has(k.toUpperCase()));
+}
 
 const iconDefaultPrototype = (L.Icon.Default as any).prototype;
 delete iconDefaultPrototype._getIconUrl;
@@ -100,8 +125,13 @@ function DeviceDetail({
   const [editName, setEditName] = useState('');
   const [editStatus, setEditStatus] = useState<DeviceStatus>('normal');
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [optimisticEdits, setOptimisticEdits] = useState<Record<string, OptimisticEdit>>({});
   const [toast, setToast] = useState<ToastState | null>(null);
+
+  const [sheetSpecs, setSheetSpecs] = useState<Record<string, string> | null>(null);
+  const [sheetSpecsLoading, setSheetSpecsLoading] = useState(false);
+  const [sheetSpecsError, setSheetSpecsError] = useState<string | null>(null);
 
   const showToast = (message: string, tone: ToastState['tone']) => {
     setToast({ message, tone });
@@ -211,6 +241,41 @@ function DeviceDetail({
     }
   };
 
+  const handleDeleteDevice = async () => {
+    if (!selectedDevice) return;
+    if (isSaving || isDeleting) return;
+
+    const ok = window.confirm(`ยืนยันการลบอุปกรณ์นี้?\n\n${selectedDevice.name} (${selectedDevice.id})`);
+    if (!ok) return;
+
+    try {
+      setIsDeleting(true);
+      await deleteDeviceData({
+        id: selectedDevice.id,
+        type: selectedDevice.type,
+        name: selectedDevice.name,
+        lat: selectedDevice.lat,
+        lng: selectedDevice.lng,
+      });
+      showToast('ลบอุปกรณ์เรียบร้อยแล้ว', 'success');
+      setIsEditing(false);
+      _onNavigateOverview();
+      onRefresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการลบอุปกรณ์';
+      const isPermissionIssue = message.includes('42501') || message.toLowerCase().includes('permission denied');
+      showToast(
+        isPermissionIssue
+          ? 'ลบไม่สำเร็จ: สิทธิ์ฐานข้อมูลไม่เพียงพอ (RLS/Policy)'
+          : `ลบไม่สำเร็จ: ${message}`,
+        'error',
+      );
+      console.error(error);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // เมื่อเลือกอุปกรณ์ใหม่ ให้ปิดโหมด Edit และถ้าอยู่หน้า History ให้ดึงข้อมูลใหม่
   useEffect(() => {
     if (!selectedDevice) return;
@@ -221,6 +286,71 @@ function DeviceDetail({
       loadHistory(selectedDevice.id);
     }
   }, [selectedDevice, activeTab]);
+
+  // Load specification values from Google Sheets for custom device types.
+  useEffect(() => {
+    if (!selectedDevice) return;
+
+    const isKnown = selectedDevice.type === 'streetlight' || selectedDevice.type === 'wifi' || selectedDevice.type === 'hydrant';
+    if (isKnown) {
+      setSheetSpecs(null);
+      setSheetSpecsError(null);
+      setSheetSpecsLoading(false);
+      return;
+    }
+
+    const appsScriptUrl = (import.meta.env.VITE_APPS_SCRIPT_SCHEMA_URL as string | undefined) ?? '';
+    const token = (import.meta.env.VITE_APPS_SCRIPT_SCHEMA_TOKEN as string | undefined) ?? '';
+    const spreadsheetId = (import.meta.env.VITE_DEVICE_SCHEMA_SPREADSHEET_ID as string | undefined) ?? '';
+
+    if (!appsScriptUrl.trim() || !spreadsheetId.trim()) {
+      setSheetSpecs(null);
+      setSheetSpecsError('ยังไม่ได้ตั้งค่า Apps Script / Spreadsheet');
+      setSheetSpecsLoading(false);
+      return;
+    }
+
+    let disposed = false;
+    (async () => {
+      setSheetSpecsLoading(true);
+      setSheetSpecsError(null);
+      try {
+        const where = {
+          LOCATION: selectedDevice.name,
+          LAT: selectedDevice.lat.toFixed(6),
+          LON: selectedDevice.lng.toFixed(6),
+        };
+
+        const result = await findSchemaRow({
+          appsScriptUrl,
+          token,
+          spreadsheetId,
+          sheetName: String(selectedDevice.type),
+          where,
+        });
+
+        if (disposed) return;
+        if (!result.found || !result.data) {
+          setSheetSpecs(null);
+          setSheetSpecsError('ไม่พบข้อมูลในชีตนี้');
+          return;
+        }
+
+        setSheetSpecs(result.data);
+      } catch (error) {
+        if (disposed) return;
+        const message = error instanceof Error ? error.message : String(error);
+        setSheetSpecs(null);
+        setSheetSpecsError(message || 'โหลดข้อมูลจากชีตไม่สำเร็จ');
+      } finally {
+        if (!disposed) setSheetSpecsLoading(false);
+      }
+    })();
+
+    return () => {
+      disposed = true;
+    };
+  }, [selectedDevice]);
 
   const loadHistory = async (id: string) => {
     setLoadingHistory(true);
@@ -302,7 +432,46 @@ function DeviceDetail({
       );
     }
 
-    return null;
+    const specsFromSheet = toSpecEntries(sheetSpecs ?? undefined);
+    const specsFromDevice = toSpecEntries(device.customFields);
+
+    const merged = new Map<string, string>();
+    for (const [k, v] of specsFromDevice) merged.set(k, v);
+    for (const [k, v] of specsFromSheet) merged.set(k, v);
+
+    const entries = Array.from(merged.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
+    if (sheetSpecsLoading) {
+      return (
+        <>
+          <div><span className="sl-field-label">ข้อมูลจำเพาะ</span><p className="sl-field-value">กำลังโหลดข้อมูลจาก Google Sheets...</p></div>
+        </>
+      );
+    }
+
+    if (sheetSpecsError) {
+      return (
+        <>
+          <div><span className="sl-field-label">ข้อมูลจำเพาะ</span><p className="sl-field-value">{sheetSpecsError}</p></div>
+        </>
+      );
+    }
+
+    if (entries.length === 0) {
+      return (
+        <>
+          <div><span className="sl-field-label">ข้อมูลจำเพาะ</span><p className="sl-field-value">-</p></div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        {entries.map(([key, value]) => (
+          <div key={key}><span className="sl-field-label">{key}</span><p className="sl-field-value">{value}</p></div>
+        ))}
+      </>
+    );
   };
 
   return (
@@ -401,9 +570,18 @@ function DeviceDetail({
                       {/* ปุ่มแก้ไข */}
                       <button
                         onClick={() => setIsEditing(!isEditing)}
-                        style={{ padding: '6px 12px', background: isEditing ? '#fef2f2' : '#f1f5f9', color: isEditing ? '#ef4444' : '#475569', border: 'none', borderRadius: '20px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
+                        disabled={isDeleting}
+                        style={{ padding: '6px 12px', background: isEditing ? '#fef2f2' : '#f1f5f9', color: isEditing ? '#ef4444' : '#475569', border: 'none', borderRadius: '20px', cursor: isDeleting ? 'not-allowed' : 'pointer', opacity: isDeleting ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
                       >
                         {isEditing ? <><X size={16} /> ยกเลิก</> : <><Edit size={16} /> แก้ไข</>}
+                      </button>
+
+                      <button
+                        onClick={handleDeleteDevice}
+                        disabled={isDeleting || isSaving}
+                        style={{ padding: '6px 12px', background: '#fef2f2', color: '#ef4444', border: 'none', borderRadius: '20px', cursor: isDeleting || isSaving ? 'not-allowed' : 'pointer', opacity: isDeleting || isSaving ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
+                      >
+                        <Trash2 size={16} /> {isDeleting ? 'กำลังลบ...' : 'ลบ'}
                       </button>
                     </div>
                   </div>

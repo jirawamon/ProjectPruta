@@ -19,6 +19,30 @@ type GetHeadersArgs = {
   sheetName: string;
 };
 
+type AppendRowArgs = {
+  appsScriptUrl: string;
+  token?: string;
+  spreadsheetId: string;
+  sheetName: string;
+  data: Record<string, string>;
+};
+
+type FindRowArgs = {
+  appsScriptUrl: string;
+  token?: string;
+  spreadsheetId: string;
+  sheetName: string;
+  where: { LOCATION: string; LAT: string; LON: string };
+};
+
+type DeleteRowArgs = {
+  appsScriptUrl: string;
+  token?: string;
+  spreadsheetId: string;
+  sheetName: string;
+  where: { LOCATION: string; LAT: string; LON: string };
+};
+
 declare global {
   interface Window {
     __projectPrutaJsonpCallbacks?: Record<string, (payload: any) => void>;
@@ -220,4 +244,131 @@ export async function getSchemaHeaders(args: GetHeadersArgs): Promise<string[]> 
   }
 
   return payload.headers.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+export async function appendSchemaRow(args: AppendRowArgs): Promise<{ rowNumber: number }> {
+  const safeUrl = safeUrlForLog(args.appsScriptUrl);
+
+  const payload = await jsonpRequest<{ ok: boolean; error?: string; rowNumber?: unknown }>(
+    {
+      appsScriptUrl: args.appsScriptUrl,
+      params: {
+        action: 'appendRow',
+        token: args.token ?? '',
+        spreadsheetId: args.spreadsheetId,
+        sheetName: args.sheetName,
+        data: JSON.stringify(args.data ?? {}),
+      },
+      log: {
+        action: 'appendRow',
+        meta: {
+          spreadsheetId: args.spreadsheetId,
+          sheetName: args.sheetName,
+          hasToken: Boolean(args.token),
+          keyCount: Object.keys(args.data ?? {}).length,
+        },
+      },
+    },
+  );
+
+  if (!payload.ok) {
+    console.error('[googleSheetsSchema] request:failed', {
+      appsScriptUrl: safeUrl,
+      spreadsheetId: args.spreadsheetId,
+      sheetName: args.sheetName,
+      error: payload.error || 'Apps Script error',
+    });
+    throw new Error(payload.error || 'Apps Script error');
+  }
+
+  const rowNumber = typeof payload.rowNumber === 'number' ? payload.rowNumber : Number(payload.rowNumber);
+  return { rowNumber: Number.isFinite(rowNumber) ? rowNumber : 0 };
+}
+
+export async function findSchemaRow(args: FindRowArgs): Promise<{ found: boolean; rowNumber?: number; data?: Record<string, string> }> {
+  const safeUrl = safeUrlForLog(args.appsScriptUrl);
+
+  const payload = await jsonpRequest<{ ok: boolean; error?: string; found?: unknown; rowNumber?: unknown; data?: unknown }>({
+    appsScriptUrl: args.appsScriptUrl,
+    params: {
+      action: 'findRow',
+      token: args.token ?? '',
+      spreadsheetId: args.spreadsheetId,
+      sheetName: args.sheetName,
+      where: JSON.stringify(args.where ?? {}),
+    },
+    log: {
+      action: 'findRow',
+      meta: {
+        spreadsheetId: args.spreadsheetId,
+        sheetName: args.sheetName,
+        hasToken: Boolean(args.token),
+      },
+    },
+  });
+
+  if (!payload.ok) {
+    console.error('[googleSheetsSchema] request:failed', {
+      appsScriptUrl: safeUrl,
+      spreadsheetId: args.spreadsheetId,
+      sheetName: args.sheetName,
+      error: payload.error || 'Apps Script error',
+    });
+    throw new Error(payload.error || 'Apps Script error');
+  }
+
+  const found = Boolean(payload.found);
+  const rowNumber = typeof payload.rowNumber === 'number' ? payload.rowNumber : Number(payload.rowNumber);
+  const data = payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
+    ? (payload.data as Record<string, string>)
+    : undefined;
+
+  return {
+    found,
+    rowNumber: Number.isFinite(rowNumber) ? rowNumber : undefined,
+    data,
+  };
+}
+
+export async function deleteSchemaRow(args: DeleteRowArgs): Promise<{ deleted: boolean; rowNumber?: number }> {
+  const safeUrl = safeUrlForLog(args.appsScriptUrl);
+
+  const payload = await jsonpRequest<{ ok: boolean; error?: string; deleted?: unknown; rowNumber?: unknown }>(
+    {
+      appsScriptUrl: args.appsScriptUrl,
+      params: {
+        action: 'deleteRow',
+        token: args.token ?? '',
+        spreadsheetId: args.spreadsheetId,
+        sheetName: args.sheetName,
+        where: JSON.stringify(args.where ?? {}),
+      },
+      log: {
+        action: 'deleteRow',
+        meta: {
+          spreadsheetId: args.spreadsheetId,
+          sheetName: args.sheetName,
+          hasToken: Boolean(args.token),
+        },
+      },
+    },
+  );
+
+  if (!payload.ok) {
+    console.error('[googleSheetsSchema] request:failed', {
+      appsScriptUrl: safeUrl,
+      spreadsheetId: args.spreadsheetId,
+      sheetName: args.sheetName,
+      error: payload.error || 'Apps Script error',
+    });
+    throw new Error(payload.error || 'Apps Script error');
+  }
+
+  const deleted = Boolean(payload.deleted);
+  const rowNumber = typeof payload.rowNumber === 'number' ? payload.rowNumber : Number(payload.rowNumber);
+
+  return {
+    deleted,
+    rowNumber: Number.isFinite(rowNumber) ? rowNumber : undefined,
+  };
 }

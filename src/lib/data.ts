@@ -1,7 +1,8 @@
 import Papa from 'papaparse';
-import { parseDeviceStatus } from '../status';
+import { parseDeviceStatus, statusLabels } from '../status';
 import type { ComplaintInput, Device, HydrantDevice, NewDeviceInput, StreetLightDevice, SyncStatus, WifiDevice } from '../types';
 import { isSupabaseEnabled, supabase } from './supabase';
+import { appendSchemaRow, deleteSchemaRow } from './googleSheetsSchema';
 
 const SHEET_STREETLIGHT =
   'https://docs.google.com/spreadsheets/d/e/2PACX-1vQv7p9ib0xXet8Alyik_Fi9CdBVvZO8xz73K4k0wEoNqpwIWAKFGIfbk0IkE8knnp-LXvNA6OceINr1/pub?gid=0&single=true&output=csv';
@@ -170,6 +171,16 @@ function upsertLocalDeviceCache(
   writeLocalDeviceCache(next);
 }
 
+function removeLocalDeviceCacheEntry(type: string, deviceId: string): void {
+  const current = readLocalDeviceCache();
+  if (current.length === 0) return;
+
+  const next = current.filter((item) => !(item.type === type && item.id === deviceId));
+  if (next.length !== current.length) {
+    writeLocalDeviceCache(next);
+  }
+}
+
 function encodeStoragePath(path: string): string {
   return path
     .split('/')
@@ -242,6 +253,44 @@ function parseRange(value: string | undefined): number {
   return parsed;
 }
 
+const BASE_SHEET_COLUMNS = new Set([
+  'LOCATION',
+  'LAT',
+  'LNG',
+  'LON',
+  'IMG_FILE',
+  'IMG_DATE',
+  'STATUS',
+  'STATUSDATE',
+  'RANGE',
+]);
+
+function collectCustomFieldsFromRow(
+  row: Record<string, unknown>,
+  excludedKeys: Set<string>,
+): Record<string, string> | undefined {
+  const output: Record<string, string> = {};
+
+  for (const [rawKey, rawValue] of Object.entries(row)) {
+    const key = String(rawKey ?? '').trim();
+    if (!key) continue;
+    const upperKey = key.toUpperCase();
+
+    if (BASE_SHEET_COLUMNS.has(upperKey)) continue;
+    if (excludedKeys.has(key) || excludedKeys.has(upperKey)) continue;
+
+    if (rawValue === null || typeof rawValue === 'undefined') continue;
+    if (typeof rawValue === 'object') continue;
+
+    const value = String(rawValue).trim();
+    if (!value) continue;
+
+    output[key] = value;
+  }
+
+  return Object.keys(output).length > 0 ? output : undefined;
+}
+
 function mapStreetLights(rows: StreetLightRow[]): StreetLightDevice[] {
   const result: StreetLightDevice[] = [];
 
@@ -250,6 +299,15 @@ function mapStreetLights(rows: StreetLightRow[]): StreetLightDevice[] {
     const lat = parseNumber(row.LAT);
     const lng = parseNumber(row.LNG) ?? parseNumber(row.LON);
     if (lat === null || lng === null) continue;
+
+    const customFields = collectCustomFieldsFromRow(row as unknown as Record<string, unknown>, new Set([
+      'ASSET_ID',
+      'ASSETOWNER',
+      'LAMP_TYPE',
+      'BULB_TYPE',
+      'WATT',
+      'BOX_ID',
+    ]));
 
     result.push({
       id: row.ASSET_ID ?? '',
@@ -267,6 +325,7 @@ function mapStreetLights(rows: StreetLightRow[]): StreetLightDevice[] {
       boxId: row.BOX_ID,
       owner: row.ASSETOWNER,
       imageDate: row.IMG_DATE,
+      customFields,
       source: 'sheet',
     });
   }
@@ -283,6 +342,13 @@ function mapWifi(rows: WifiRow[]): WifiDevice[] {
     const lng = parseNumber(row.LNG) ?? parseNumber(row.LON);
     if (lat === null || lng === null) continue;
 
+    const customFields = collectCustomFieldsFromRow(row as unknown as Record<string, unknown>, new Set([
+      'WIFI_ID',
+      'ISP',
+      'SPEED',
+      'DEVICE_COUNT',
+    ]));
+
     result.push({
       id: row.WIFI_ID ?? '',
       name: row.LOCATION || 'Wi-Fi',
@@ -296,6 +362,7 @@ function mapWifi(rows: WifiRow[]): WifiDevice[] {
       isp: row.ISP,
       speed: row.SPEED,
       deviceCount: parseNumber(row.DEVICE_COUNT) ?? 0,
+      customFields,
       source: 'sheet',
     });
   }
@@ -312,6 +379,12 @@ function mapHydrants(rows: HydrantRow[]): HydrantDevice[] {
     const lng = parseNumber(row.LNG) ?? parseNumber(row.LON);
     if (lat === null || lng === null) continue;
 
+    const customFields = collectCustomFieldsFromRow(row as unknown as Record<string, unknown>, new Set([
+      'HYDRANT_ID',
+      'PRESSURE',
+      'LAST_CHECK',
+    ]));
+
     result.push({
       id: row.HYDRANT_ID ?? '',
       name: row.LOCATION || 'ประปา',
@@ -324,6 +397,7 @@ function mapHydrants(rows: HydrantRow[]): HydrantDevice[] {
       rangeMeters: parseRange(row.RANGE),
       pressure: row.PRESSURE,
       lastCheck: row.LAST_CHECK,
+      customFields,
       source: 'sheet',
     });
   }
@@ -332,6 +406,7 @@ function mapHydrants(rows: HydrantRow[]): HydrantDevice[] {
 }
 
 interface DeviceDbRow {
+  [key: string]: unknown;
   id?: string;
   device_code?: string;
   name?: string;
@@ -469,6 +544,40 @@ function mapDbRows(rows: DeviceDbRow[]): Device[] {
         syncStatus: 'synced' as const,
         source: 'supabase' as const,
       };
+
+      const excludedDbKeys = new Set<string>([
+        'id',
+        'device_code',
+        'name',
+        'device_type',
+        'type',
+        'lat',
+        'lng',
+        'lon',
+        'status',
+        'department',
+        'description',
+        'range_meters',
+        'range',
+        'sketch_pin',
+        'sketchPin',
+        'device_image_url',
+        'image_url',
+        'photo_url',
+        'created_at',
+        'updated_at',
+        'use_sketch_pin',
+        'use_radius_pin',
+        'useSketchPin',
+        'useRadiusPin',
+        'syncStatus',
+        'source',
+      ]);
+
+      const customFields = collectCustomFieldsFromRow(row, excludedDbKeys);
+      if (customFields) {
+        device.customFields = customFields;
+      }
 
       return device;
     });
@@ -673,6 +782,58 @@ export async function saveDevicePosition(input: NewDeviceInput): Promise<Device>
 
   // Queue as pending first so offline/network failures can be synced later.
   upsertLocalDeviceCache(device, 'pending');
+
+  // Optional: also append the device to Google Sheets schema tab for custom device types.
+  // This is separate from the public CSV feeds (those are read-only from the frontend).
+  try {
+    const isKnown = input.type === 'streetlight' || input.type === 'wifi' || input.type === 'hydrant';
+    if (!isKnown) {
+      const appsScriptUrl = (import.meta.env.VITE_APPS_SCRIPT_SCHEMA_URL as string | undefined) ?? '';
+      const token = (import.meta.env.VITE_APPS_SCRIPT_SCHEMA_TOKEN as string | undefined) ?? '';
+      const spreadsheetId = (import.meta.env.VITE_DEVICE_SCHEMA_SPREADSHEET_ID as string | undefined) ?? '';
+
+      if (appsScriptUrl.trim() && spreadsheetId.trim()) {
+        const dataForSheet: Record<string, string> = {
+          LOCATION: input.name,
+          LAT: Number.isFinite(input.lat) ? input.lat.toFixed(6) : String(input.lat),
+          LON: Number.isFinite(input.lng) ? input.lng.toFixed(6) : String(input.lng),
+          IMG_FILE: '',
+          IMG_DATE: '',
+          STATUS: statusLabels[input.status] ?? String(input.status),
+          STATUSDATE: new Date().toISOString(),
+          RANGE: String(input.useRadiusPin ? (input.radiusMeters ?? 0) : 0),
+        };
+
+        if (input.customFields && typeof input.customFields === 'object') {
+          for (const [key, value] of Object.entries(input.customFields)) {
+            const normalizedKey = String(key).trim();
+            const normalizedValue = String(value ?? '').trim();
+            if (!normalizedKey || !normalizedValue) continue;
+            dataForSheet[normalizedKey] = normalizedValue;
+          }
+        }
+
+        // Also include common known fields; ignored if column doesn't exist in the sheet.
+        if (input.owner) dataForSheet.ASSETOWNER = input.owner;
+        if (input.watt) dataForSheet.WATT = input.watt;
+        if (input.lampType) dataForSheet.LAMP_TYPE = input.lampType;
+        if (input.bulbType) dataForSheet.BULB_TYPE = input.bulbType;
+        if (input.isp) dataForSheet.ISP = input.isp;
+        if (input.speed) dataForSheet.SPEED = input.speed;
+        if (input.pressure) dataForSheet.PRESSURE = input.pressure;
+
+        await appendSchemaRow({
+          appsScriptUrl,
+          token,
+          spreadsheetId,
+          sheetName: String(input.type),
+          data: dataForSheet,
+        });
+      }
+    }
+  } catch (error) {
+    console.warn('[data] Failed to append device row to Google Sheets:', error);
+  }
 
   if (!isSupabaseEnabled || !supabase) {
     console.warn('[data] Supabase is disabled or missing env vars; queued device as pending in local cache.');
@@ -1016,4 +1177,67 @@ export async function updateDeviceData(deviceId: string, updates: Partial<Device
       note: meta?.note ?? null,
     });
   }
+}
+
+export async function deleteDeviceData(device: {
+  id: string;
+  type: Device['type'];
+  name?: string;
+  lat?: number;
+  lng?: number;
+}): Promise<void> {
+  if (!isSupabaseEnabled || !supabase) {
+    throw new Error('Supabase is not enabled');
+  }
+
+  // For custom device types, also delete from Google Sheets schema tab.
+  // Built-in types (streetlight/wifi/hydrant) are read from public CSV feeds and are not managed by this Apps Script.
+  const isKnown = device.type === 'streetlight' || device.type === 'wifi' || device.type === 'hydrant';
+  if (!isKnown) {
+    const appsScriptUrl = (import.meta.env.VITE_APPS_SCRIPT_SCHEMA_URL as string | undefined) ?? '';
+    const token = (import.meta.env.VITE_APPS_SCRIPT_SCHEMA_TOKEN as string | undefined) ?? '';
+    const spreadsheetId = (import.meta.env.VITE_DEVICE_SCHEMA_SPREADSHEET_ID as string | undefined) ?? '';
+
+    if (appsScriptUrl.trim() && spreadsheetId.trim() && device.name && typeof device.lat === 'number' && typeof device.lng === 'number') {
+      const result = await deleteSchemaRow({
+        appsScriptUrl,
+        token,
+        spreadsheetId,
+        sheetName: String(device.type),
+        where: {
+          LOCATION: device.name,
+          LAT: Number.isFinite(device.lat) ? device.lat.toFixed(6) : String(device.lat),
+          LON: Number.isFinite(device.lng) ? device.lng.toFixed(6) : String(device.lng),
+        },
+      });
+
+      if (!result.deleted) {
+        console.warn('[data] deleteSchemaRow: row not found; continuing with DB delete', {
+          deviceId: device.id,
+          type: device.type,
+        });
+      }
+    }
+  }
+
+  const devicesTable = supabase.from('devices') as any;
+
+  let result = await devicesTable.delete().eq('device_code', device.id).select('id');
+  if (result.error?.code === '42703') {
+    result = await devicesTable.delete().eq('id', device.id).select('id');
+  }
+
+  // ถ้าใช้ device_code แล้วไม่เจอแถว ให้ลองลบด้วย id ด้วย
+  if (!result.error && (result.data?.length ?? 0) === 0) {
+    const fallback = await devicesTable.delete().eq('id', device.id).select('id');
+    if (fallback.error || (fallback.data?.length ?? 0) > 0) {
+      result = fallback;
+    }
+  }
+
+  if (result.error) {
+    throw new Error(formatSupabaseError(result.error));
+  }
+
+  removeLocalDeviceCacheEntry(device.type, device.id);
 }
